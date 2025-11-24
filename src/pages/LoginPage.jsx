@@ -2,26 +2,15 @@ import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Icons } from '../components/Icons';
 import { signInWithEmailAndPassword } from 'firebase/auth';
-import { auth } from '../services/firebase';
+import { doc, getDoc } from 'firebase/firestore'; // Importando ferramentas do banco
+import { auth, db } from '../services/firebase';
 
 const InputField = ({ label, type, placeholder, icon: Icon, id, value, onChange, required = true }) => (
   <div className="form-group">
-    <label htmlFor={id} className="form-label">
-      {label}
-    </label>
+    <label htmlFor={id} className="form-label">{label}</label>
     <div className="input-wrapper">
-      <div className="input-icon">
-        <Icon size={18} />
-      </div>
-      <input
-        type={type}
-        id={id}
-        className="form-input"
-        placeholder={placeholder}
-        value={value}
-        onChange={onChange}
-        required={required}
-      />
+      <div className="input-icon"><Icon size={18} /></div>
+      <input type={type} id={id} className="form-input" placeholder={placeholder} value={value} onChange={onChange} required={required} />
     </div>
   </div>
 );
@@ -29,10 +18,7 @@ const InputField = ({ label, type, placeholder, icon: Icon, id, value, onChange,
 export default function LoginPage() {
   const navigate = useNavigate();
   const [animate, setAnimate] = useState(false);
-  const [formData, setFormData] = useState({
-    email: '',
-    password: ''
-  });
+  const [formData, setFormData] = useState({ email: '', password: '' });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -41,10 +27,7 @@ export default function LoginPage() {
   }, []);
 
   const handleChange = (e) => {
-    setFormData({
-      ...formData,
-      [e.target.id]: e.target.value
-    });
+    setFormData({ ...formData, [e.target.id]: e.target.value });
   };
 
   const handleLogin = async (e) => {
@@ -53,21 +36,39 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
-      await signInWithEmailAndPassword(auth, formData.email, formData.password);
-      
-      // Sucesso!
-      console.log("Logado com sucesso!");
-      navigate('/'); // Redireciona para Home ou Dashboard
+      // 1. Autentica o usuário (E-mail e Senha)
+      const userCredential = await signInWithEmailAndPassword(auth, formData.email, formData.password);
+      const user = userCredential.user;
+
+      // 2. Verifica a "Role" (Papel) no Banco de Dados antes de redirecionar
+      // Isso evita que o usuário seja barrado na próxima tela
+      const userDocRef = doc(db, "users", user.uid);
+      const userDoc = await getDoc(userDocRef);
+
+      if (userDoc.exists()) {
+        const userData = userDoc.data();
+        
+        if (userData.role === 'creator') {
+          console.log("Login de Criador confirmado. Redirecionando...");
+          navigate('/creator-dashboard');
+        } else if (userData.role === 'clipper') {
+          navigate('/clipper-dashboard');
+        } else {
+          setError("Erro: Seu usuário não tem um perfil definido.");
+        }
+      } else {
+        setError("Erro: Usuário sem registro no banco de dados.");
+      }
 
     } catch (err) {
       console.error("Erro no login:", err);
-      // Tratamento de erros de login
+      // Tratamento de erros comuns
       if (err.code === 'auth/invalid-credential' || err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password') {
         setError("E-mail ou senha incorretos.");
-      } else if (err.code === 'auth/too-many-requests') {
-        setError("Muitas tentativas falhas. Tente novamente mais tarde.");
+      } else if (err.message.includes("network") || err.message.includes("failed to fetch")) {
+        setError("Erro de conexão. Verifique se algum AdBlock está bloqueando o banco de dados.");
       } else {
-        setError("Erro ao fazer login. Verifique sua conexão.");
+        setError("Ocorreu um erro ao entrar. Tente novamente.");
       }
     } finally {
       setLoading(false);
@@ -86,15 +87,7 @@ export default function LoginPage() {
         <div className="hero-bg-overlay"></div>
       </div>
 
-      {/* Header Simples com Link para Home */}
-      <header
-        className="header"
-        style={{
-          position: 'absolute',
-          background: 'transparent',
-          border: 'none',
-        }}
-      >
+      <header className="header" style={{ position: 'absolute', background: 'transparent', border: 'none' }}>
         <div className="container nav-container">
           <Link to="/" className="logo" style={{ textDecoration: 'none' }}>
             <Icons.Play fill="url(#gradient)" size={28} />
@@ -150,7 +143,7 @@ export default function LoginPage() {
               className="btn btn-primary btn-block btn-lg"
               disabled={loading}
             >
-              {loading ? 'Entrando...' : 'Entrar na Plataforma'}
+              {loading ? 'Verificando Perfil...' : 'Entrar na Plataforma'}
               {!loading && <Icons.ArrowRight size={20} style={{ marginLeft: '8px' }} />}
             </button>
 

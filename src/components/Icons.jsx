@@ -184,8 +184,8 @@ export const Icons = {
       strokeLinecap="round"
       strokeLinejoin="round"
     >
-      <path d="M5 12h14"></path>
-      <path d="m12 5 7 7-7 7"></path>
+      <line x1="5" x2="19" y1="12" y2="12"></line>
+      <polyline points="12 5 19 12 12 19"></polyline>
     </svg>
   ),
   Google: ({ size = 20 }) => (
@@ -214,4 +214,31 @@ export const Icons = {
       />
     </svg>
   ),
+  
+  Plus: ({ size = 24 }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="12" x2="12" y1="5" y2="19"></line>
+      <line x1="5" x2="19" y1="12" y2="12"></line>
+    </svg>
+  ),
+  LogOut: ({ size = 24 }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+      <polyline points="16 17 21 12 16 7"></polyline>
+      <line x1="21" x2="9" y1="12" y2="12"></line>
+    </svg>
+  ),
+  Clock: ({ size = 24 }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="10"></circle>
+      <polyline points="12 6 12 12 16 14"></polyline>
+    </svg>
+  ),
+  AlertCircle: ({ size = 24 }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="10"></circle>
+      <line x1="12" x2="12" y1="8" y2="12"></line>
+      <line x1="12" x2="12.01" y1="16" y2="16"></line>
+    </svg>
+  )
 };
