@@ -33,11 +33,9 @@ body {
 
 /* Utilitários de Layout */
 .container {
-  display: flex;
   max-width: 1200px;
   margin: 0 auto;
   padding: 0 20px;
-  flex-direction: column;
 }
 
 .section {
@@ -486,6 +484,9 @@ body {
   margin-top: 60px;
   background: var(--bg-card);
   text-align: center;
+}
+.footer .logo {
+  margin:auto;
 }
 .footer-text {
   color: var(--text-muted);
