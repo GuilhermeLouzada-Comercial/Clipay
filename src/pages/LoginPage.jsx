@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Icons } from '../components/Icons';
+import { signInWithEmailAndPassword } from 'firebase/auth';
+import { auth } from '../services/firebase';
 
-const InputField = ({ label, type, placeholder, icon: Icon, id }) => (
+const InputField = ({ label, type, placeholder, icon: Icon, id, value, onChange, required = true }) => (
   <div className="form-group">
     <label htmlFor={id} className="form-label">
       {label}
@@ -16,23 +18,67 @@ const InputField = ({ label, type, placeholder, icon: Icon, id }) => (
         id={id}
         className="form-input"
         placeholder={placeholder}
+        value={value}
+        onChange={onChange}
+        required={required}
       />
     </div>
   </div>
 );
 
 export default function LoginPage() {
+  const navigate = useNavigate();
   const [animate, setAnimate] = useState(false);
+  const [formData, setFormData] = useState({
+    email: '',
+    password: ''
+  });
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     setAnimate(true);
   }, []);
 
+  const handleChange = (e) => {
+    setFormData({
+      ...formData,
+      [e.target.id]: e.target.value
+    });
+  };
+
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    setError('');
+    setLoading(true);
+
+    try {
+      await signInWithEmailAndPassword(auth, formData.email, formData.password);
+      
+      // Sucesso!
+      console.log("Logado com sucesso!");
+      navigate('/'); // Redireciona para Home ou Dashboard
+
+    } catch (err) {
+      console.error("Erro no login:", err);
+      // Tratamento de erros de login
+      if (err.code === 'auth/invalid-credential' || err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password') {
+        setError("E-mail ou senha incorretos.");
+      } else if (err.code === 'auth/too-many-requests') {
+        setError("Muitas tentativas falhas. Tente novamente mais tarde.");
+      } else {
+        setError("Erro ao fazer login. Verifique sua conexão.");
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="app auth-page">
       <div className="hero-bg-wrapper">
         <img
-          src="[https://media.istockphoto.com/id/1405608734/vector/glowing-neon-lines-tunnel-led-arcade-stage-abstract-technology-background-virtual-reality.jpg?s=612x612&w=0&k=20&c=6qvHGCesp7DYYkYLUlBI1f_JnWQWsQDutY769MYLPu0=](https://media.istockphoto.com/id/1405608734/vector/glowing-neon-lines-tunnel-led-arcade-stage-abstract-technology-background-virtual-reality.jpg?s=612x612&w=0&k=20&c=6qvHGCesp7DYYkYLUlBI1f_JnWQWsQDutY769MYLPu0=)"
+          src="https://media.istockphoto.com/id/1405608734/vector/glowing-neon-lines-tunnel-led-arcade-stage-abstract-technology-background-virtual-reality.jpg?s=612x612&w=0&k=20&c=6qvHGCesp7DYYkYLUlBI1f_JnWQWsQDutY769MYLPu0="
           alt="Background"
           className="hero-bg-img"
           style={{ opacity: 0.1 }}
@@ -70,13 +116,21 @@ export default function LoginPage() {
             <p>Acesse seu dashboard para gerenciar ganhos e cortes.</p>
           </div>
 
-          <form className="auth-form" onSubmit={(e) => e.preventDefault()}>
+          {error && (
+            <div style={{ color: '#ef4444', background: 'rgba(239, 68, 68, 0.1)', padding: '10px', borderRadius: '8px', marginBottom: '20px', fontSize: '0.9rem', textAlign: 'center' }}>
+              {error}
+            </div>
+          )}
+
+          <form className="auth-form" onSubmit={handleLogin}>
             <InputField
               id="email"
               label="E-mail"
               type="email"
               placeholder="seu@email.com"
               icon={Icons.Mail}
+              value={formData.email}
+              onChange={handleChange}
             />
             <InputField
               id="password"
@@ -84,22 +138,27 @@ export default function LoginPage() {
               type="password"
               placeholder="••••••••"
               icon={Icons.Lock}
+              value={formData.password}
+              onChange={handleChange}
             />
 
             <a href="#" className="forgot-password">
               Esqueceu sua senha?
             </a>
 
-            <button className="btn btn-primary btn-block btn-lg">
-              Entrar na Plataforma
-              <Icons.ArrowRight size={20} style={{ marginLeft: '8px' }} />
+            <button 
+              className="btn btn-primary btn-block btn-lg"
+              disabled={loading}
+            >
+              {loading ? 'Entrando...' : 'Entrar na Plataforma'}
+              {!loading && <Icons.ArrowRight size={20} style={{ marginLeft: '8px' }} />}
             </button>
 
             <div className="auth-divider">
               <span>Ou entre com</span>
             </div>
 
-            <button className="btn btn-outline btn-block social-btn">
+            <button type="button" className="btn btn-outline btn-block social-btn">
               <Icons.Google size={20} />
               Google
             </button>
