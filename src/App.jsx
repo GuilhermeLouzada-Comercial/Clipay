@@ -2,8 +2,11 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import LandingPage from './pages/LandingPage';
 import LoginPage from './pages/LoginPage';
 import SignupPage from './pages/SignupPage';
+
 import CreatorDashboard from './pages/CreatorDashboard';
 import ClipperDashboard from './pages/ClipperDashboard';
+import AdminDashboard from './pages/AdminDashboard';
+
 import PrivateRoute from './components/PrivateRoute';
 
 export default function App() {
@@ -34,6 +37,15 @@ export default function App() {
             </PrivateRoute>
           } 
         /> 
+
+      <Route 
+          path="/admin-dashboard" 
+          element={
+            <PrivateRoute requiredRole="admin">
+              <AdminDashboard />
+            </PrivateRoute>
+          } 
+        />
       </Routes>
     </BrowserRouter>
   );

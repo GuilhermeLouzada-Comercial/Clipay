@@ -16,7 +16,7 @@ const Header = () => (
       <Link to="/">
         <div className="logo">
           <Icons.Play fill={'url(#gradient)'} size={28} />
-          Clipay
+          ClipayClub
         </div>
       </Link>
       <nav className="nav-links">

@@ -53,6 +53,8 @@ export default function LoginPage() {
           navigate('/creator-dashboard');
         } else if (userData.role === 'clipper') {
           navigate('/clipper-dashboard');
+        } else if (userData.role === 'admin') {
+          navigate('/admin-dashboard');
         } else {
           setError("Erro: Seu usuário não tem um perfil definido.");
         }
