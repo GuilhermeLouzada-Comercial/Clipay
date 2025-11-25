@@ -1,16 +1,70 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { Icons } from '../components/Icons';
+import { auth, db } from '../services/firebase';
+import { onAuthStateChanged } from 'firebase/auth';
+import { doc, getDoc } from 'firebase/firestore';
 
-// Função auxiliar simples
+// --- UTILITÁRIOS ---
+
+// Gera número aleatório entre min e max
 function getRandomInt(min: number, max: number) {
-  min = Math.ceil(min);
-  max = Math.floor(max);
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
+// Formata moeda (R$)
+const formatCurrency = (value: number) => {
+  return new Intl.NumberFormat('pt-BR', {
+    style: 'currency',
+    currency: 'BRL',
+    minimumFractionDigits: 2, // Garante que sempre mostre os centavos (ex: ,00)
+    maximumFractionDigits: 2,
+  }).format(value);
+};
+
+
+// Formata números compactos (ex: 1.2M, 850K)
+const formatCompact = (value: number) => {
+  return new Intl.NumberFormat('en-US', {
+    notation: 'compact',
+    maximumFractionDigits: 1,
+  }).format(value);
+};
+
+// Gera um array de alturas para o gráfico com tendência de crescimento
+const generateGrowthData = (length: number) => {
+  const data: number[] = [];
+  let current = 30; // Começa em 30%
+  for (let i = 0; i < length; i++) {
+    // Adiciona um valor aleatório que tende a ser positivo (crescimento)
+    // Variação entre -10 e +25
+    const change = getRandomInt(-10, 25);
+    current += change;
+    
+    // Mantém entre 20% e 100%
+    if (current > 100) current = 100;
+    if (current < 20) current = 20;
+    
+    data.push(current);
+  }
+  // Garante que o último seja alto para dar sensação de sucesso
+  data[data.length - 1] = getRandomInt(85, 100);
+  return data;
+};
+
 // --- TIPOS ---
 type Role = 'creator' | 'clipper';
+
+interface UserState {
+  name: string;
+  role: string;
+  uid: string;
+}
+
+interface HeaderProps {
+  user: UserState | null;
+  loading: boolean;
+}
 
 interface HeroProps {
   activeRole: Role;
@@ -24,12 +78,8 @@ interface RolesSectionProps {
 
 // --- COMPONENTES ---
 
-const Header = () => (
+const Header = ({ user, loading }: HeaderProps) => (
   <header className="header">
-    {/* 
-      ALTERAÇÃO 1: Adicionei style inline com display: flex e justifyContent: space-between.
-      Isso garante que no mobile (onde o nav-links some), o botão vá para a direita.
-    */}
     <div className="container nav-container" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
       <Link to="/" style={{ textDecoration: 'none' }}>
         <div className="logo">
@@ -39,24 +89,37 @@ const Header = () => (
       </Link>
       
       <nav className="nav-links">
-        <a href="#features" className="nav-link">
-          Funcionalidades
-        </a>
-        <a href="#roles" className="nav-link">
-          Para Quem?
-        </a>
-        <a href="#pricing" className="nav-link">
-          Preços
-        </a>
+        <a href="#features" className="nav-link">Funcionalidades</a>
+        <a href="#roles" className="nav-link">Para Quem?</a>
+        <a href="#pricing" className="nav-link">Preços</a>
       </nav>
 
-      <div className="nav-buttons">
-        <Link to="/login">
-          <button className="btn btn-outline hide-mobile">Login</button>
-        </Link>
-        <Link to="/signup">
-          <button className="btn btn-primary">Começar Agora</button>
-        </Link>
+      <div className="nav-buttons" style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+        {loading ? (
+          <span style={{ color: '#9ca3af', fontSize: '0.9rem' }}>...</span>
+        ) : user ? (
+          // ESTADO LOGADO
+          <>
+            <span style={{ color: 'white', fontWeight: 500, fontSize: '0.95rem' }}>
+              Olá, {user.name.split(' ')[0]}
+            </span>
+            <Link to={user.role === 'creator' ? '/creator-dashboard' : user.role === 'admin' ? '/admin-dashboard' : '/clipper-dashboard'}>
+              <button className="btn btn-primary" style={{ padding: '8px 20px', fontSize: '0.9rem' }}>
+                Dashboard <Icons.ArrowRight size={16} style={{ marginLeft: 5 }} />
+              </button>
+            </Link>
+          </>
+        ) : (
+          // ESTADO DESLOGADO
+          <>
+            <Link to="/login">
+              <button className="btn btn-outline hide-mobile">Login</button>
+            </Link>
+            <Link to="/signup">
+              <button className="btn btn-primary">Começar Agora</button>
+            </Link>
+          </>
+        )}
       </div>
     </div>
 
@@ -72,74 +135,104 @@ const Header = () => (
 const DashboardPreview = ({ role }: { role: Role }) => {
   const [hoveredBar, setHoveredBar] = useState<number | null>(null);
 
-  // ALTERAÇÃO 2: useMemo para gerar os IDs apenas UMA vez ao carregar a página.
-  // Eles não vão mudar ao trocar de aba ou passar o mouse.
-  const randomIds = useMemo(() => ({
-    creator: getRandomInt(1000, 99999),
-    clipper: getRandomInt(1000, 99999)
-  }), []);
+  // LÓGICA ORGÂNICA: Gera dados aleatórios e crescentes apenas uma vez ao carregar
+  const dashboardData = useMemo(() => {
+    const id = getRandomInt(10000, 99999);
+    const rawHeights = generateGrowthData(12); // Gera as alturas (12 barras)
 
-  const data = {
-    creator: {
-      title: 'Dashboard Criador de Conteúdo',
-      mainLabel: 'Saldo da Campanha',
-      mainValue: 'R$145.250,00',
-      btnText: '+ Nova Campanha',
-      stats: [
-        { val: '+27.4M', label: 'Views Totais', color: 'var(--success)' },
-        { val: '842', label: 'Vídeos Aprovados', color: 'white' },
-        { val: '156', label: 'Clipadores Ativos', color: 'white' },
-      ],
-      graphLabel: 'Visualizações Semanais',
-      graphColor: 'var(--gradient-main)',
-      getTooltip: (height: number) => `${(height / 15).toFixed(1)}M Views`,
-    },
-    clipper: {
-      title: 'Dashboard do Clipador',
-      mainLabel: 'Disponível para Saque',
-      mainValue: 'R$15.850,00',
-      btnText: 'Solicitar Pix',
-      stats: [
-        { val: '#1', label: 'Ranking Campanha', color: 'var(--warning)' },
-        { val: '42', label: 'Vídeos Postados', color: 'white' },
-        { val: 'R$750', label: 'Bônus Hoje', color: 'var(--success)' },
-      ],
-      graphLabel: 'Ganhos Semanais',
-      graphColor: 'var(--gradient-clipper)',
-      getTooltip: (height: number) => `R$ ${(height * 9).toFixed(0)},00`,
-    },
-  };
+    // AQUI ESTÁ A CORREÇÃO:
+    // Removemos o Math.random() do cálculo do valor.
+    // Agora o valor é diretamente proporcional à altura (height).
+    const bars = rawHeights.map((height) => {
+      if (role === 'creator') {
+        // Ex: Se a altura for 80, será 80 * 0.25 = 20.0M Views
+        // Isso garante que barra maior = número maior
+        const viewCount = (height * 0.06).toFixed(1);
+        return {
+          height,
+          tooltip: `${viewCount}M Views`
+        };
+      } else {
+        // Lógica do clipador
+        // Ex: Altura 80 * 18 = R$ 1.440,00
+        return {
+          height,
+          tooltip: formatCurrency(height * 18)
+        };
+      }
+    });
 
-  const current = data[role];
-  const barHeights = [40, 60, 45, 70, 50, 80, 65, 90, 75, 100];
+    if (role === 'creator') {
+      const revenue = getRandomInt(80000, 250000); 
+      const views = getRandomInt(15000000, 45000000); 
+      const videos = getRandomInt(500, 1200);
+      const clippers = getRandomInt(80, 300);
+
+      return {
+        id,
+        title: 'Dashboard Criador',
+        mainLabel: 'Saldo da Campanha',
+        mainValue: formatCurrency(revenue),
+        btnText: '+ Nova Campanha',
+        stats: [
+          { val: `+${formatCompact(views)}`, label: 'Views Totais', color: 'var(--success)' },
+          { val: videos.toString(), label: 'Vídeos Aprovados', color: 'white' },
+          { val: clippers.toString(), label: 'Clipadores Ativos', color: 'white' },
+        ],
+        graphLabel: 'Visualizações Semanais',
+        graphColor: 'var(--gradient-main)',
+        bars, 
+      };
+    } else {
+      const balance = getRandomInt(2500, 18000); 
+      const rank = getRandomInt(1, 15);
+      const videos = getRandomInt(20, 150);
+      const bonus = getRandomInt(100, 1000);
+
+      return {
+        id,
+        title: 'Dashboard Clipador',
+        mainLabel: 'Disponível para Saque',
+        mainValue: formatCurrency(balance),
+        btnText: 'Solicitar Pix',
+        stats: [
+          { val: `#${rank}`, label: 'Ranking Global', color: 'var(--warning)' },
+          { val: videos.toString(), label: 'Vídeos Postados', color: 'white' },
+          { val: formatCurrency(bonus), label: 'Bônus Hoje', color: 'var(--success)' },
+        ],
+        graphLabel: 'Ganhos Semanais',
+        graphColor: 'var(--gradient-clipper)',
+        bars,
+      };
+    }
+  }, [role]);
 
   return (
     <div className="dashboard-preview">
       <div className="dash-title-bar">
         <div className="dash-indicator"></div>
-        {/* Usa o ID fixo gerado pelo useMemo */}
-        {current.title + ' #' + randomIds[role]}
+        {dashboardData.title + ' #' + dashboardData.id}
       </div>
 
       <div className="dash-header">
         <div>
           <div style={{ fontSize: '0.8rem', color: '#9ca3af' }}>
-            {current.mainLabel}
+            {dashboardData.mainLabel}
           </div>
           <div style={{ fontSize: '1.8rem', fontWeight: '700' }}>
-            {current.mainValue}
+            {dashboardData.mainValue}
           </div>
         </div>
         <button
           className="btn btn-primary dash-action-btn"
           style={{ padding: '5px 15px', fontSize: '0.8rem', cursor: 'default' }}
         >
-          {current.btnText}
+          {dashboardData.btnText}
         </button>
       </div>
 
       <div className="dash-stats">
-        {current.stats.map((stat, index) => (
+        {dashboardData.stats.map((stat, index) => (
           <div key={index} className="stat-box">
             <div className="stat-val" style={{ color: stat.color }}>
               {stat.val}
@@ -150,16 +243,16 @@ const DashboardPreview = ({ role }: { role: Role }) => {
       </div>
 
       <div className="graph-container">
-        <div className="graph-label">{current.graphLabel}</div>
+        <div className="graph-label">{dashboardData.graphLabel}</div>
         <div
           style={{
             height: '150px',
             display: 'flex',
             alignItems: 'flex-end',
-            gap: '10px',
+            gap: '8px',
           }}
         >
-          {barHeights.map((height, i) => (
+          {dashboardData.bars.map((bar, i) => (
             <div
               key={i}
               className="bar-interactive"
@@ -167,18 +260,18 @@ const DashboardPreview = ({ role }: { role: Role }) => {
               onMouseLeave={() => setHoveredBar(null)}
               style={{
                 width: '100%',
-                height: role === 'clipper' ? `${height * 0.8}%` : `${height}%`,
-                background: current.graphColor,
-                opacity: 0.3 + i * 0.07,
+                height: `${bar.height}%`, 
+                background: dashboardData.graphColor,
+                opacity: 0.4 + (i / dashboardData.bars.length) * 0.6,
                 borderRadius: '4px 4px 0 0',
-                transition: 'all 0.3s ease',
+                transition: 'all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)',
                 position: 'relative',
                 cursor: 'pointer',
               }}
             >
               {hoveredBar === i && (
                 <div className="chart-tooltip">
-                  {current.getTooltip(height)}
+                  {bar.tooltip}
                 </div>
               )}
             </div>
@@ -455,10 +548,39 @@ const Footer = () => {
 
 export default function LandingPage() {
   const [activeRole, setActiveRole] = useState<Role>('creator');
+  const [user, setUser] = useState<UserState | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  // Efeito para verificar autenticação
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+      if (currentUser) {
+        try {
+          const userDoc = await getDoc(doc(db, "users", currentUser.uid));
+          if (userDoc.exists()) {
+            const data = userDoc.data();
+            setUser({
+              name: data.name || 'Usuário',
+              role: data.role || 'creator',
+              uid: currentUser.uid
+            });
+          }
+        } catch (error) {
+          console.error("Erro ao buscar dados do usuário:", error);
+        }
+      } else {
+        setUser(null);
+      }
+      setLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, []);
 
   return (
     <div className="app">
-      <Header />
+      {/* Passamos o estado do usuário para o Header */}
+      <Header user={user} loading={loading} />
       <Hero activeRole={activeRole} setActiveRole={setActiveRole} />
       <RolesSection activeRole={activeRole} setActiveRole={setActiveRole} />
       <ComparisonSection />
