@@ -1,5 +1,7 @@
 import React from 'react'
 
+import { SpeedInsights } from "@vercel/speed-insights/next"
+
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import LandingPage from './pages/LandingPage';
 import LoginPage from './pages/LoginPage';
@@ -13,6 +15,7 @@ import PrivateRoute from './components/PrivateRoute';
 
 export default function App() {
   return (
+    <><SpeedInsights />
     <BrowserRouter>
       <Routes>
         {/* Rotas Públicas */}
@@ -21,35 +24,26 @@ export default function App() {
         <Route path="/signup" element={<SignupPage />} />
 
         {/* Rotas Privadas - Criador */}
-        <Route 
-          path="/creator-dashboard" 
-          element={
-            <PrivateRoute requiredRole="creator">
-              <CreatorDashboard />
-            </PrivateRoute>
-          } 
-        />
+        <Route
+          path="/creator-dashboard"
+          element={<PrivateRoute requiredRole="creator">
+            <CreatorDashboard />
+          </PrivateRoute>} />
 
         {/* Rotas Privadas - Clipador */}
-        <Route 
-          path="/clipper-dashboard" 
-          element={
-            <PrivateRoute requiredRole="clipper">
-              <ClipperDashboard />
-            </PrivateRoute>
-          } 
-        /> 
+        <Route
+          path="/clipper-dashboard"
+          element={<PrivateRoute requiredRole="clipper">
+            <ClipperDashboard />
+          </PrivateRoute>} />
 
         {/* Rotas Privadas - Admin */}
-        <Route 
-          path="/admin-dashboard" 
-          element={
-            <PrivateRoute requiredRole="admin">
-              <AdminDashboard />
-            </PrivateRoute>
-          } 
-        />
+        <Route
+          path="/admin-dashboard"
+          element={<PrivateRoute requiredRole="admin">
+            <AdminDashboard />
+          </PrivateRoute>} />
       </Routes>
-    </BrowserRouter>
+    </BrowserRouter></>
   );
 }
