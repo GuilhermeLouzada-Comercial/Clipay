@@ -1,6 +1,6 @@
 import React from 'react'
 
-import { SpeedInsights } from "@vercel/speed-insights/next"
+import { SpeedInsights } from "@vercel/speed-insights/react"
 
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import LandingPage from './pages/LandingPage';
@@ -15,7 +15,6 @@ import PrivateRoute from './components/PrivateRoute';
 
 export default function App() {
   return (
-    <><SpeedInsights />
     <BrowserRouter>
       <Routes>
         {/* Rotas Públicas */}
@@ -44,6 +43,7 @@ export default function App() {
             <AdminDashboard />
           </PrivateRoute>} />
       </Routes>
-    </BrowserRouter></>
+      <SpeedInsights />
+    </BrowserRouter>
   );
 }
