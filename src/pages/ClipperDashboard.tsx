@@ -5,8 +5,25 @@ import { signOut } from 'firebase/auth';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { useNavigate } from 'react-router-dom';
 
-// Componente de Card de Estatística
-const StatCard = ({ label, value, icon: Icon, color }) => (
+// --- TIPOS ---
+interface UserData {
+  name: string;
+  pixKey: string;
+  email: string;
+}
+
+type ViewType = 'overview' | 'rankings' | 'settings';
+
+interface StatCardProps {
+  label: string;
+  value: string;
+  icon: React.ElementType;
+  color: string;
+}
+
+// --- COMPONENTES AUXILIARES ---
+
+const StatCard: React.FC<StatCardProps> = ({ label, value, icon: Icon, color }) => (
   <div style={{ background: '#121218', padding: '20px', borderRadius: '12px', border: '1px solid #27272a', display: 'flex', alignItems: 'center', gap: '15px' }}>
     <div style={{ width: '45px', height: '45px', borderRadius: '10px', background: `${color}20`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: color }}>
       <Icon size={24} />
@@ -20,8 +37,11 @@ const StatCard = ({ label, value, icon: Icon, color }) => (
 
 export default function ClipperDashboard() {
   const navigate = useNavigate();
-  const [view, setView] = useState('overview'); // overview, rankings, settings
-  const [userData, setUserData] = useState({ name: '', pixKey: '', email: '' });
+  
+  // Estados
+  const [view, setView] = useState<ViewType>('overview');
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [userData, setUserData] = useState<UserData>({ name: '', pixKey: '', email: '' });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -31,7 +51,7 @@ export default function ClipperDashboard() {
         const docRef = doc(db, "users", auth.currentUser.uid);
         const docSnap = await getDoc(docRef);
         if (docSnap.exists()) {
-          setUserData(docSnap.data());
+          setUserData(docSnap.data() as UserData);
         }
         setLoading(false);
       }
@@ -44,9 +64,11 @@ export default function ClipperDashboard() {
     navigate('/login');
   };
 
-  const handleSaveSettings = async (e) => {
+  const handleSaveSettings = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
+    if (!auth.currentUser) return;
+
     try {
       const docRef = doc(db, "users", auth.currentUser.uid);
       await updateDoc(docRef, {
@@ -62,38 +84,84 @@ export default function ClipperDashboard() {
     }
   };
 
-  return (
-    <div style={{ minHeight: '100vh', background: '#0b0b0f', color: 'white', paddingBottom: '40px' }}>
-      {/* Navbar Logada */}
-      <header style={{ background: 'rgba(18, 18, 24, 0.8)', backdropFilter: 'blur(10px)', borderBottom: '1px solid #27272a', position: 'sticky', top: 0, zIndex: 50 }}>
-        <div className="container" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '15px 20px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '1.2rem', fontWeight: 'bold', color: '#3b82f6' }}>
-            <Icons.Play fill="#3b82f6" size={24} />
-            Clipay Clipper
-          </div>
-          
-          <div style={{ display: 'flex', gap: '20px', alignItems: 'center' }}>
-            {/* Menu de Navegação Desktop */}
-            <nav style={{ display: 'flex', gap: '15px' }}>
-              <button onClick={() => setView('overview')} style={{ background: 'none', border: 'none', color: view === 'overview' ? 'white' : '#9ca3af', cursor: 'pointer', fontWeight: view === 'overview' ? 'bold' : 'normal' }}>Visão Geral</button>
-              <button onClick={() => setView('rankings')} style={{ background: 'none', border: 'none', color: view === 'rankings' ? 'white' : '#9ca3af', cursor: 'pointer', fontWeight: view === 'rankings' ? 'bold' : 'normal' }}>Rankings</button>
-              <button onClick={() => setView('settings')} style={{ background: 'none', border: 'none', color: view === 'settings' ? 'white' : '#9ca3af', cursor: 'pointer', fontWeight: view === 'settings' ? 'bold' : 'normal' }}>Configurações</button>
-            </nav>
-            
-            <div style={{ width: '1px', height: '20px', background: '#27272a' }}></div>
-            
-            <button onClick={handleLogout} style={{ background: 'transparent', border: 'none', color: '#ef4444', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px', fontSize: '0.9rem' }}>
-              <Icons.LogOut size={18} />
-            </button>
-          </div>
-        </div>
-      </header>
+  // Função para trocar de aba e fechar o menu no mobile automaticamente
+  const changeView = (newView: ViewType) => {
+    setView(newView);
+    setIsMobileMenuOpen(false);
+  };
 
-      <div className="container" style={{ marginTop: '40px', padding: '0 20px' }}>
+  return (
+    <div className="dashboard-layout">
+      
+      {/* 1. HEADER MOBILE (Só aparece em telas pequenas) */}
+      <div className="mobile-header">
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontWeight: 'bold', color: '#3b82f6' }}>
+          <Icons.Play fill="#3b82f6" size={24} />
+          Clipay
+        </div>
+        <button 
+          onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+          style={{ background: 'none', border: 'none', color: 'white', cursor: 'pointer' }}
+        >
+          {isMobileMenuOpen ? <Icons.X size={28} /> : <Icons.Menu size={28} />}
+        </button>
+      </div>
+
+      {/* Overlay Escuro (Fundo) quando menu mobile está aberto */}
+      {isMobileMenuOpen && (
+        <div className="overlay" onClick={() => setIsMobileMenuOpen(false)}></div>
+      )}
+
+      {/* 2. SIDEBAR (Navegação Lateral) */}
+      <aside className={`sidebar ${isMobileMenuOpen ? 'open' : ''}`}>
+        {/* Logo Desktop */}
+        <div style={{ padding: '25px 20px', display: 'flex', alignItems: 'center', gap: '10px', fontSize: '1.2rem', fontWeight: 'bold', color: '#3b82f6' }}>
+          <Icons.Play fill="#3b82f6" size={28} />
+          Clipay Clipper
+        </div>
+
+        {/* Links de Navegação */}
+        <nav className="sidebar-nav">
+          <button 
+            onClick={() => changeView('overview')} 
+            className={`sidebar-btn ${view === 'overview' ? 'active' : ''}`}
+          >
+            <Icons.BarChart3 size={20} /> Visão Geral
+          </button>
+          
+          <button 
+            onClick={() => changeView('rankings')} 
+            className={`sidebar-btn ${view === 'rankings' ? 'active' : ''}`}
+          >
+            <Icons.Trophy size={20} /> Rankings
+          </button>
+          
+          <button 
+            onClick={() => changeView('settings')} 
+            className={`sidebar-btn ${view === 'settings' ? 'active' : ''}`}
+          >
+            <Icons.User size={20} /> Configurações
+          </button>
+        </nav>
+
+        {/* Footer da Sidebar (Logout) */}
+        <div className="sidebar-footer">
+          <button 
+            onClick={handleLogout} 
+            className="sidebar-btn" 
+            style={{ color: '#ef4444' }}
+          >
+            <Icons.LogOut size={20} /> Sair da Conta
+          </button>
+        </div>
+      </aside>
+
+      {/* 3. CONTEÚDO PRINCIPAL */}
+      <main className="main-content">
         
         {/* --- VISÃO GERAL --- */}
         {view === 'overview' && (
-          <>
+          <div className="fade-in-up">
             <h1 style={{ fontSize: '1.8rem', marginBottom: '5px' }}>Olá, {userData.name || 'Clipador'}</h1>
             <p style={{ color: '#9ca3af', marginBottom: '30px' }}>Veja seus resultados e ganhos.</p>
 
@@ -107,12 +175,12 @@ export default function ClipperDashboard() {
             <div style={{ padding: '40px', textAlign: 'center', background: '#121218', borderRadius: '12px', border: '1px dashed #27272a' }}>
               <p style={{ color: '#9ca3af' }}>Você ainda não participou de nenhuma campanha.</p>
             </div>
-          </>
+          </div>
         )}
 
         {/* --- RANKINGS --- */}
         {view === 'rankings' && (
-          <>
+          <div className="fade-in-up">
             <h1 style={{ fontSize: '1.8rem', marginBottom: '30px' }}>Rankings</h1>
             
             <div style={{ background: '#121218', borderRadius: '12px', border: '1px solid #27272a', overflow: 'hidden' }}>
@@ -149,12 +217,12 @@ export default function ClipperDashboard() {
                 ))}
               </div>
             </div>
-          </>
+          </div>
         )}
 
         {/* --- CONFIGURAÇÕES --- */}
         {view === 'settings' && (
-          <div style={{ maxWidth: '600px', margin: '0 auto' }}>
+          <div className="fade-in-up" style={{ maxWidth: '600px', margin: '0 auto' }}>
             <h1 style={{ fontSize: '1.8rem', marginBottom: '30px' }}>Meus Dados</h1>
             
             <div style={{ background: '#121218', padding: '30px', borderRadius: '16px', border: '1px solid #27272a' }}>
@@ -205,7 +273,7 @@ export default function ClipperDashboard() {
           </div>
         )}
 
-      </div>
+      </main>
     </div>
   );
 }

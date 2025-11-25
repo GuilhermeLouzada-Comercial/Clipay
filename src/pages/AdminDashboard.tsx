@@ -2,11 +2,42 @@ import React, { useState, useEffect } from 'react';
 import { Icons } from '../components/Icons';
 import { auth, db } from '../services/firebase';
 import { signOut } from 'firebase/auth';
-import { collection, getDocs, doc, updateDoc, query, where, orderBy } from 'firebase/firestore';
+import { collection, getDocs, doc, updateDoc } from 'firebase/firestore';
 import { useNavigate } from 'react-router-dom';
 
-// Componente de Card (Reutilizado para consistência visual)
-const StatCard = ({ label, value, subtext, icon: Icon, color }) => (
+// 1. Definimos a "forma" que uma Campanha tem
+interface CampaignData {
+  id: string;
+  title: string;
+  budget: number;
+  cpm: number;
+  requiredHashtag: string;
+  status: string;
+  creatorId?: string;
+  createdAt?: any;
+}
+
+// 2. Definimos a "forma" das estatísticas
+interface DashboardStats {
+  totalRevenue: number;
+  nextPayments: number;
+  totalViews: number;
+  totalVideos: number;
+  activeClippers: number;
+  activeCreators: number;
+}
+
+// 3. Tipagem das props do Card
+interface StatCardProps {
+  label: string;
+  value: string | number;
+  subtext?: string;
+  icon: React.ElementType; // Aceita um componente (como Icons.Wallet)
+  color: string;
+}
+
+// Componente de Card
+const StatCard: React.FC<StatCardProps> = ({ label, value, subtext, icon: Icon, color }) => (
   <div style={{ background: '#121218', padding: '20px', borderRadius: '12px', border: '1px solid #27272a', display: 'flex', alignItems: 'center', gap: '15px' }}>
     <div style={{ width: '50px', height: '50px', borderRadius: '12px', background: `${color}20`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: color }}>
       <Icon size={24} />
@@ -21,19 +52,19 @@ const StatCard = ({ label, value, subtext, icon: Icon, color }) => (
 
 export default function AdminDashboard() {
   const navigate = useNavigate();
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState<boolean>(true);
   
-  // Estados para armazenar as métricas
-  const [stats, setStats] = useState({
+  // Estados tipados com as interfaces criadas acima
+  const [stats, setStats] = useState<DashboardStats>({
     totalRevenue: 0,
-    nextPayments: 0, // Previsão para 7 dias
+    nextPayments: 0,
     totalViews: 0,
     totalVideos: 0,
     activeClippers: 0,
     activeCreators: 0
   });
 
-  const [pendingCampaigns, setPendingCampaigns] = useState([]);
+  const [pendingCampaigns, setPendingCampaigns] = useState<CampaignData[]>([]);
 
   useEffect(() => {
     fetchData();
@@ -41,12 +72,13 @@ export default function AdminDashboard() {
 
   const fetchData = async () => {
     try {
-      // 1. Buscar Usuários (Clipadores e Criadores)
+      // 1. Buscar Usuários
       const usersSnap = await getDocs(collection(db, "users"));
       let clippers = 0;
       let creators = 0;
-      usersSnap.forEach(doc => {
-        const data = doc.data();
+      
+      usersSnap.forEach(docSnap => {
+        const data = docSnap.data();
         if (data.role === 'clipper') clippers++;
         if (data.role === 'creator') creators++;
       });
@@ -54,35 +86,31 @@ export default function AdminDashboard() {
       // 2. Buscar Campanhas
       const campaignsSnap = await getDocs(collection(db, "campaigns"));
       let revenue = 0;
-      let pending = [];
+      const pending: CampaignData[] = [];
       
-      campaignsSnap.forEach(doc => {
-        const data = doc.data();
+      campaignsSnap.forEach(docSnap => {
+        // Aqui dizemos ao TS que os dados são do tipo CampaignData
+        const data = docSnap.data() as Omit<CampaignData, 'id'>;
+        
         // Soma ao caixa se a campanha não foi rejeitada
         if (data.status !== 'rejected') {
+          // O TS garante que data.budget é number. Se vier string do banco, ideal seria converter: Number(data.budget)
           revenue += Number(data.budget) || 0;
         }
         
-        // Filtra campanhas pendentes de aprovação/pagamento
+        // Filtra campanhas pendentes
         if (data.status === 'pending_payment' || data.status === 'pending_approval') {
-          pending.push({ id: doc.id, ...data });
+          pending.push({ id: docSnap.id, ...data });
         }
       });
 
-      // 3. Buscar Vídeos (Simulação - caso ainda não tenha a coleção 'videos', assumimos 0)
-      // Quando criar a coleção videos, descomente abaixo:
-      /*
-      const videosSnap = await getDocs(collection(db, "videos"));
-      const totalVids = videosSnap.size;
-      let views = 0;
-      videosSnap.forEach(v => views += (v.data().views || 0));
-      */
-      const totalVids = 0; // Placeholder
-      const views = 0;     // Placeholder
+      // 3. Placeholder para vídeos
+      const totalVids = 0; 
+      const views = 0;     
 
       setStats({
         totalRevenue: revenue,
-        nextPayments: revenue * 0.3, // Exemplo: Estima que 30% do caixa sai em 7 dias (ajuste conforme regra de negócio)
+        nextPayments: revenue * 0.3,
         totalViews: views,
         totalVideos: totalVids,
         activeClippers: clippers,
@@ -98,14 +126,14 @@ export default function AdminDashboard() {
     }
   };
 
-  const handleApproveCampaign = async (campaignId, currentTitle) => {
+  const handleApproveCampaign = async (campaignId: string, currentTitle: string) => {
     if(!window.confirm(`Confirmar o recebimento do PIX para a campanha "${currentTitle}"?`)) return;
 
     try {
       const campaignRef = doc(db, "campaigns", campaignId);
       await updateDoc(campaignRef, {
         status: 'active',
-        approvedAt: new Date() // Usando data do cliente por simplicidade, ideal é serverTimestamp
+        approvedAt: new Date() 
       });
       
       // Atualiza a lista localmente

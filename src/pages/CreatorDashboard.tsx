@@ -5,8 +5,56 @@ import { signOut } from 'firebase/auth';
 import { collection, addDoc, query, where, getDocs, serverTimestamp } from 'firebase/firestore';
 import { useNavigate } from 'react-router-dom';
 
+// --- TIPOS ---
+interface Campaign {
+  id: string;
+  title: string;
+  budget: number;
+  cpm: number;
+  description: string;
+  requiredHashtag: string;
+  status: 'active' | 'pending_payment' | 'rejected' | 'finished';
+  creatorId: string;
+  createdAt: any;
+}
+
+interface NewCampaignState {
+  title: string;
+  budget: string;
+  cpm: string;
+  description: string;
+  hashtag: string;
+}
+
+interface DashInputProps {
+  label: string;
+  type?: string;
+  value: string | number;
+  onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => void;
+  placeholder?: string;
+  prefix?: string;
+}
+
+interface StatCardProps {
+  label: string;
+  value: string | number;
+  icon: React.ElementType;
+  color: string;
+}
+
+// --- FUNÇÃO AUXILIAR DE FORMATAÇÃO ---
+const formatCurrency = (value: number | string) => {
+  const numberValue = Number(value);
+  if (isNaN(numberValue)) return 'R$ 0,00';
+  
+  return new Intl.NumberFormat('pt-BR', {
+    style: 'currency',
+    currency: 'BRL'
+  }).format(numberValue);
+};
+
 // Componente interno de Input para o Dashboard
-const DashInput = ({ label, type = "text", value, onChange, placeholder, prefix }) => (
+const DashInput: React.FC<DashInputProps> = ({ label, type = "text", value, onChange, placeholder, prefix }) => (
   <div style={{ marginBottom: '15px' }}>
     <label style={{ display: 'block', marginBottom: '8px', fontSize: '0.9rem', color: '#9ca3af' }}>{label}</label>
     <div style={{ display: 'flex', alignItems: 'center', background: 'rgba(255,255,255,0.05)', border: '1px solid #27272a', borderRadius: '8px', padding: '0 12px' }}>
@@ -22,18 +70,31 @@ const DashInput = ({ label, type = "text", value, onChange, placeholder, prefix 
   </div>
 );
 
+// Componente Visual do Card de Estatística
+const StatCard: React.FC<StatCardProps> = ({ label, value, icon: Icon, color }) => (
+  <div style={{ background: '#121218', padding: '20px', borderRadius: '12px', border: '1px solid #27272a', display: 'flex', alignItems: 'center', gap: '15px' }}>
+    <div style={{ width: '45px', height: '45px', borderRadius: '10px', background: `${color}20`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: color }}>
+      <Icon size={24} />
+    </div>
+    <div>
+      <div style={{ fontSize: '0.85rem', color: '#9ca3af' }}>{label}</div>
+      <div style={{ fontSize: '1.5rem', fontWeight: '700', color: 'white' }}>{value}</div>
+    </div>
+  </div>
+);
+
 export default function CreatorDashboard() {
   const navigate = useNavigate();
-  const [view, setView] = useState('dashboard'); // 'dashboard' ou 'new-campaign'
+  const [view, setView] = useState<'dashboard' | 'new-campaign'>('dashboard');
   const [userName, setUserName] = useState('');
-  const [campaigns, setCampaigns] = useState([]);
+  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Estado do formulário de nova campanha
-  const [newCampaign, setNewCampaign] = useState({
+  const [newCampaign, setNewCampaign] = useState<NewCampaignState>({
     title: '',
     budget: '',
-    cpm: '', // Custo por mil views
+    cpm: '', 
     description: '',
     hashtag: ''
   });
@@ -46,7 +107,13 @@ export default function CreatorDashboard() {
         // Busca campanhas deste usuário
         const q = query(collection(db, "campaigns"), where("creatorId", "==", auth.currentUser.uid));
         const querySnapshot = await getDocs(q);
-        const userCampaigns = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        
+        // Mapeia e força a tipagem
+        const userCampaigns = querySnapshot.docs.map(doc => ({ 
+          id: doc.id, 
+          ...doc.data() 
+        })) as Campaign[];
+        
         setCampaigns(userCampaigns);
         setLoading(false);
       }
@@ -59,24 +126,29 @@ export default function CreatorDashboard() {
     navigate('/login');
   };
 
-  const handleCreateCampaign = async (e) => {
+  const handleCreateCampaign = async (e: React.FormEvent) => {
     e.preventDefault();
     
+    if (!auth.currentUser) return;
+
     try {
+      const budgetVal = parseFloat(newCampaign.budget);
+      const cpmVal = parseFloat(newCampaign.cpm);
+
       // 1. Salva a campanha no banco como "Pendente de Pagamento"
       const docRef = await addDoc(collection(db, "campaigns"), {
         creatorId: auth.currentUser.uid,
         title: newCampaign.title,
-        budget: parseFloat(newCampaign.budget),
-        cpm: parseFloat(newCampaign.cpm),
+        budget: budgetVal,
+        cpm: cpmVal,
         description: newCampaign.description,
         requiredHashtag: newCampaign.hashtag,
-        status: 'pending_payment', // Status inicial
+        status: 'pending_payment', 
         createdAt: serverTimestamp()
       });
 
-      // 2. Gera a mensagem para o WhatsApp
-      const message = `Olá! Acabei de criar a campanha "${newCampaign.title}" na Clipay (ID: ${docRef.id}).\n\nOrçamento: R$ ${newCampaign.budget}\nCPM: R$ ${newCampaign.cpm}\n\nGostaria de realizar o pagamento via PIX para ativar a campanha.`;
+      // 2. Gera a mensagem para o WhatsApp com valores formatados
+      const message = `Olá! Acabei de criar a campanha "${newCampaign.title}" na Clipay (ID: ${docRef.id}).\n\nOrçamento: ${formatCurrency(budgetVal)}\nCPM: ${formatCurrency(cpmVal)}\n\nGostaria de realizar o pagamento via PIX para ativar a campanha.`;
       
       const whatsappUrl = `https://wa.me/553133601286?text=${encodeURIComponent(message)}`;
 
@@ -93,19 +165,6 @@ export default function CreatorDashboard() {
       alert("Erro ao criar campanha. Tente novamente.");
     }
   };
-
-  // Componente Visual do Card de Estatística
-  const StatCard = ({ label, value, icon: Icon, color }) => (
-    <div style={{ background: '#121218', padding: '20px', borderRadius: '12px', border: '1px solid #27272a', display: 'flex', alignItems: 'center', gap: '15px' }}>
-      <div style={{ width: '45px', height: '45px', borderRadius: '10px', background: `${color}20`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: color }}>
-        <Icon size={24} />
-      </div>
-      <div>
-        <div style={{ fontSize: '0.85rem', color: '#9ca3af' }}>{label}</div>
-        <div style={{ fontSize: '1.5rem', fontWeight: '700', color: 'white' }}>{value}</div>
-      </div>
-    </div>
-  );
 
   return (
     <div style={{ minHeight: '100vh', background: '#0b0b0f', color: 'white', paddingBottom: '40px' }}>
@@ -161,9 +220,24 @@ export default function CreatorDashboard() {
           <>
             {/* Stats Grid */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '20px', marginBottom: '40px' }}>
-              <StatCard label="Investimento Total" value={`R$ ${campaigns.reduce((acc, curr) => acc + curr.budget, 0)}`} icon={Icons.Wallet} color="#3b82f6" />
-              <StatCard label="Campanhas Ativas" value={campaigns.filter(c => c.status === 'active').length} icon={Icons.Trophy} color="#fbbf24" />
-              <StatCard label="Views Totais" value="0" icon={Icons.BarChart3} color="#10b981" />
+              <StatCard 
+                label="Investimento Total" 
+                value={formatCurrency(campaigns.reduce((acc, curr) => acc + curr.budget, 0))} 
+                icon={Icons.Wallet} 
+                color="#3b82f6" 
+              />
+              <StatCard 
+                label="Campanhas Ativas" 
+                value={campaigns.filter(c => c.status === 'active').length} 
+                icon={Icons.Trophy} 
+                color="#fbbf24" 
+              />
+              <StatCard 
+                label="Views Totais" 
+                value="0" 
+                icon={Icons.BarChart3} 
+                color="#10b981" 
+              />
             </div>
 
             {/* Lista de Campanhas */}
@@ -184,8 +258,8 @@ export default function CreatorDashboard() {
                     <div>
                       <h3 style={{ fontSize: '1.1rem', marginBottom: '5px', color: 'white' }}>{camp.title}</h3>
                       <div style={{ display: 'flex', gap: '15px', fontSize: '0.85rem', color: '#9ca3af' }}>
-                        <span>Orçamento: R$ {camp.budget}</span>
-                        <span>CPM: R$ {camp.cpm}</span>
+                        <span>Orçamento: <strong style={{ color: '#10b981' }}>{formatCurrency(camp.budget)}</strong></span>
+                        <span>CPM: {formatCurrency(camp.cpm)}</span>
                         <span style={{ color: '#3b82f6' }}>#{camp.requiredHashtag}</span>
                       </div>
                     </div>
@@ -219,7 +293,7 @@ export default function CreatorDashboard() {
               />
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
                 <DashInput 
-                  label="Orçamento Total (R$)" 
+                  label="Orçamento Total" 
                   type="number" 
                   placeholder="1000" 
                   prefix="R$"
@@ -246,7 +320,7 @@ export default function CreatorDashboard() {
               <div style={{ marginBottom: '25px' }}>
                 <label style={{ display: 'block', marginBottom: '8px', fontSize: '0.9rem', color: '#9ca3af' }}>Regras e Descrição</label>
                 <textarea 
-                  rows="4"
+                  rows={4}
                   value={newCampaign.description}
                   onChange={(e) => setNewCampaign({...newCampaign, description: e.target.value})}
                   placeholder="Descreva o que você espera dos clipadores..."

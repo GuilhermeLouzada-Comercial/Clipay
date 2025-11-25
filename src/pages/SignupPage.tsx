@@ -1,12 +1,25 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Icons } from '../components/Icons'; // Agora este arquivo existe!
+import { Icons } from '../components/Icons';
 import { createUserWithEmailAndPassword, updateProfile } from 'firebase/auth';
 import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
-import { auth, db } from '../services/firebase'; // Agora este arquivo existe!
+import { auth, db } from '../services/firebase';
 
-// Componente de Input atualizado para aceitar valor e evento de mudança
-const InputField = ({ label, type, placeholder, icon: Icon, id, value, onChange, required = true }) => (
+// Tipos
+type UserRole = 'creator' | 'clipper';
+
+interface InputFieldProps {
+  label: string;
+  type: string;
+  placeholder: string;
+  icon: React.ElementType;
+  id: string;
+  value: string;
+  onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  required?: boolean;
+}
+
+const InputField: React.FC<InputFieldProps> = ({ label, type, placeholder, icon: Icon, id, value, onChange, required = true }) => (
   <div className="form-group">
     <label htmlFor={id} className="form-label">
       {label}
@@ -30,10 +43,10 @@ const InputField = ({ label, type, placeholder, icon: Icon, id, value, onChange,
 
 export default function SignupPage() {
   const navigate = useNavigate();
-  const [activeRole, setActiveRole] = useState('creator');
+  // Tipamos o estado activeRole
+  const [activeRole, setActiveRole] = useState<UserRole>('creator');
   const [animate, setAnimate] = useState(false);
   
-  // Estados para armazenar os dados do formulário
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -47,15 +60,14 @@ export default function SignupPage() {
     setAnimate(true);
   }, []);
 
-  // Atualiza o estado conforme o usuário digita
-  const handleChange = (e) => {
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setFormData({
       ...formData,
       [e.target.id]: e.target.value
     });
   };
 
-  const handleSignup = async (e) => {
+  const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setLoading(true);
@@ -87,24 +99,28 @@ export default function SignupPage() {
         displayName: formData.name
       });
 
-      // 3. Salva os dados extras (Role/Papel) no Banco de Dados (Firestore)
-      // Criamos um documento na coleção 'users' com o mesmo ID da autenticação (uid)
+      // 3. Salva os dados extras no Firestore
       await setDoc(doc(db, "users", user.uid), {
         uid: user.uid,
         name: formData.name,
         email: formData.email,
-        role: activeRole, // 'creator' ou 'clipper'
+        role: activeRole,
         createdAt: serverTimestamp(),
-        pixKey: "" // Campo vazio para preencher depois
+        pixKey: "" 
       });
 
-      // Sucesso! Redireciona para o dashboard (ou home)
       console.log("Conta criada com sucesso:", user.uid);
-      navigate('/'); // Mude para '/dashboard' quando tiver a rota criada
+      
+      // Redirecionamento baseado na role escolhida
+      if (activeRole === 'creator') {
+        navigate('/creator-dashboard');
+      } else {
+        navigate('/clipper-dashboard');
+      }
 
-    } catch (err) {
+    } catch (err: any) {
       console.error("Erro ao criar conta:", err);
-      // Tratamento de erros comuns do Firebase em Português
+      
       if (err.code === 'auth/email-already-in-use') {
         setError("Este e-mail já está sendo usado.");
       } else if (err.code === 'auth/invalid-email') {
@@ -137,7 +153,7 @@ export default function SignupPage() {
           border: 'none',
         }}
       >
-        <div className="container nav-container">
+        <div className="container nav-container" style={{ display: 'flex', justifyContent: 'center' }}>
           <Link to="/" className="logo" style={{ textDecoration: 'none' }}>
             <Icons.Play fill="url(#gradient)" size={28} />
             Clipay

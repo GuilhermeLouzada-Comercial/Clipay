@@ -1,77 +1,91 @@
 import React from 'react';
 
+// 1. Criamos uma interface padrão para TODOS os ícones
+// Assim, todos aceitam size, color, fill e style opcionalmente.
+export interface IconProps {
+  size?: number | string;
+  color?: string;
+  fill?: string;
+  style?: React.CSSProperties;
+}
+
 export const Icons = {
-  Play: ({ size = 24, fill = 'none' }) => (
+  Play: ({ size = 24, fill = 'none', color = 'currentColor', style }: IconProps) => (
     <svg
       width={size}
       height={size}
       viewBox="0 0 24 24"
       fill={fill}
-      stroke="currentColor"
+      stroke={color}
       strokeWidth="2"
       strokeLinecap="round"
       strokeLinejoin="round"
+      style={style}
     >
       <polygon points="5 3 19 12 5 21 5 3"></polygon>
     </svg>
   ),
-  BarChart3: ({ size = 24 }) => (
+  BarChart3: ({ size = 24, color = 'currentColor', style }: IconProps) => (
     <svg
       width={size}
       height={size}
       viewBox="0 0 24 24"
       fill="none"
-      stroke="currentColor"
+      stroke={color}
       strokeWidth="2"
       strokeLinecap="round"
       strokeLinejoin="round"
+      style={style}
     >
       <line x1="12" x2="12" y1="20" y2="10"></line>
       <line x1="18" x2="18" y1="20" y2="4"></line>
       <line x1="6" x2="6" y1="20" y2="16"></line>
     </svg>
   ),
-  Wallet: ({ size = 24 }) => (
+  Wallet: ({ size = 24, color = 'currentColor', style }: IconProps) => (
     <svg
       width={size}
       height={size}
       viewBox="0 0 24 24"
       fill="none"
-      stroke="currentColor"
+      stroke={color}
       strokeWidth="2"
       strokeLinecap="round"
       strokeLinejoin="round"
+      style={style}
     >
       <path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"></path>
       <path d="M3 5v14a2 2 0 0 0 2 2h16v-5"></path>
       <path d="M18 12a2 2 0 0 0 0 4h4v-4Z"></path>
     </svg>
   ),
-  ShieldCheck: ({ size = 24 }) => (
+  ShieldCheck: ({ size = 24, color = 'currentColor', style }: IconProps) => (
     <svg
       width={size}
       height={size}
       viewBox="0 0 24 24"
       fill="none"
-      stroke="currentColor"
+      stroke={color}
       strokeWidth="2"
       strokeLinecap="round"
       strokeLinejoin="round"
+      style={style}
     >
       <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
       <path d="m9 12 2 2 4-4"></path>
     </svg>
   ),
-  Trophy: ({ size = 24 }) => (
+  Trophy: ({ size = 24, color = 'currentColor', style }: IconProps) => (
     <svg
       width={size}
       height={size}
       viewBox="0 0 24 24"
       fill="none"
-      stroke="currentColor"
+      stroke={color}
       strokeWidth="2"
       strokeLinecap="round"
       strokeLinejoin="round"
+      style={style}
     >
       <path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"></path>
       <path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"></path>
@@ -81,105 +95,111 @@ export const Icons = {
       <path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"></path>
     </svg>
   ),
-  LineChart: ({ size = 24 }) => (
+  LineChart: ({ size = 24, color = 'currentColor', style }: IconProps) => (
     <svg
       width={size}
       height={size}
       viewBox="0 0 24 24"
       fill="none"
-      stroke="currentColor"
+      stroke={color}
       strokeWidth="2"
       strokeLinecap="round"
       strokeLinejoin="round"
+      style={style}
     >
       <path d="M3 3v18h18"></path>
       <path d="m19 9-5 5-4-4-3 3"></path>
     </svg>
   ),
-  CheckCircle: ({ size = 24, color }) => (
+  CheckCircle: ({ size = 24, color = 'currentColor', style }: IconProps) => (
     <svg
       width={size}
       height={size}
       viewBox="0 0 24 24"
       fill="none"
-      stroke={color || 'currentColor'}
+      stroke={color}
       strokeWidth="2"
       strokeLinecap="round"
       strokeLinejoin="round"
+      style={style}
     >
       <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
       <polyline points="22 4 12 14.01 9 11.01"></polyline>
     </svg>
   ),
-  XCircle: ({ size = 24, color }) => (
+  XCircle: ({ size = 24, color = 'currentColor', style }: IconProps) => (
     <svg
       width={size}
       height={size}
       viewBox="0 0 24 24"
       fill="none"
-      stroke={color || 'currentColor'}
+      stroke={color}
       strokeWidth="2"
       strokeLinecap="round"
       strokeLinejoin="round"
+      style={style}
     >
       <circle cx="12" cy="12" r="10"></circle>
       <line x1="15" y1="9" x2="9" y2="15"></line>
       <line x1="9" y1="9" x2="15" y2="15"></line>
     </svg>
   ),
-  User: ({ size = 20 }) => (
+  User: ({ size = 20, color = 'currentColor', style }: IconProps) => (
     <svg
       width={size}
       height={size}
       viewBox="0 0 24 24"
       fill="none"
-      stroke="currentColor"
+      stroke={color}
       strokeWidth="2"
       strokeLinecap="round"
       strokeLinejoin="round"
+      style={style}
     >
       <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"></path>
       <circle cx="12" cy="7" r="4"></circle>
     </svg>
   ),
-  Mail: ({ size = 20 }) => (
+  Mail: ({ size = 20, color = 'currentColor', style }: IconProps) => (
     <svg
       width={size}
       height={size}
       viewBox="0 0 24 24"
       fill="none"
-      stroke="currentColor"
+      stroke={color}
       strokeWidth="2"
       strokeLinecap="round"
       strokeLinejoin="round"
+      style={style}
     >
       <rect width="20" height="16" x="2" y="4" rx="2"></rect>
       <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"></path>
     </svg>
   ),
-  Lock: ({ size = 20 }) => (
+  Lock: ({ size = 20, color = 'currentColor', style }: IconProps) => (
     <svg
       width={size}
       height={size}
       viewBox="0 0 24 24"
       fill="none"
-      stroke="currentColor"
+      stroke={color}
       strokeWidth="2"
       strokeLinecap="round"
       strokeLinejoin="round"
+      style={style}
     >
       <rect width="18" height="11" x="3" y="11" rx="2" ry="2"></rect>
       <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
     </svg>
   ),
-  ArrowRight: ({ size = 20, style }) => (
+  ArrowRight: ({ size = 20, color = 'currentColor', style }: IconProps) => (
     <svg
       width={size}
       height={size}
       style={style}
       viewBox="0 0 24 24"
       fill="none"
-      stroke="currentColor"
+      stroke={color}
       strokeWidth="2"
       strokeLinecap="round"
       strokeLinejoin="round"
@@ -188,13 +208,14 @@ export const Icons = {
       <polyline points="12 5 19 12 12 19"></polyline>
     </svg>
   ),
-  Google: ({ size = 20 }) => (
+  Google: ({ size = 20, style }: IconProps) => (
     <svg
       width={size}
       height={size}
       viewBox="0 0 24 24"
       fill="currentColor"
       stroke="none"
+      style={style}
     >
       <path
         d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
@@ -214,31 +235,43 @@ export const Icons = {
       />
     </svg>
   ),
-  
-  Plus: ({ size = 24 }) => (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+  Plus: ({ size = 24, color = 'currentColor', style }: IconProps) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}>
       <line x1="12" x2="12" y1="5" y2="19"></line>
       <line x1="5" x2="19" y1="12" y2="12"></line>
     </svg>
   ),
-  LogOut: ({ size = 24 }) => (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+  LogOut: ({ size = 24, color = 'currentColor', style }: IconProps) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}>
       <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
       <polyline points="16 17 21 12 16 7"></polyline>
       <line x1="21" x2="9" y1="12" y2="12"></line>
     </svg>
   ),
-  Clock: ({ size = 24 }) => (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+  Clock: ({ size = 24, color = 'currentColor', style }: IconProps) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}>
       <circle cx="12" cy="12" r="10"></circle>
       <polyline points="12 6 12 12 16 14"></polyline>
     </svg>
   ),
-  AlertCircle: ({ size = 24 }) => (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+  AlertCircle: ({ size = 24, color = 'currentColor', style }: IconProps) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}>
       <circle cx="12" cy="12" r="10"></circle>
       <line x1="12" x2="12" y1="8" y2="12"></line>
       <line x1="12" x2="12.01" y1="16" y2="16"></line>
     </svg>
-  )
+  ),
+  Menu: ({ size = 24, color = 'currentColor', style }: IconProps) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}>
+      <line x1="3" x2="21" y1="12" y2="12"></line>
+      <line x1="3" x2="21" y1="6" y2="6"></line>
+      <line x1="3" x2="21" y1="18" y2="18"></line>
+    </svg>
+  ),
+  X: ({ size = 24, color = 'currentColor', style }: IconProps) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}>
+      <line x1="18" x2="6" y1="6" y2="18"></line>
+      <line x1="6" x2="18" y1="6" y2="18"></line>
+    </svg>
+  ),
 };

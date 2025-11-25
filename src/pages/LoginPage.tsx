@@ -2,15 +2,35 @@ import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Icons } from '../components/Icons';
 import { signInWithEmailAndPassword } from 'firebase/auth';
-import { doc, getDoc } from 'firebase/firestore'; // Importando ferramentas do banco
+import { doc, getDoc } from 'firebase/firestore';
 import { auth, db } from '../services/firebase';
 
-const InputField = ({ label, type, placeholder, icon: Icon, id, value, onChange, required = true }) => (
+// Interface para as props do Input
+interface InputFieldProps {
+  label: string;
+  type: string;
+  placeholder: string;
+  icon: React.ElementType; // Aceita um componente React (o ícone)
+  id: string;
+  value: string;
+  onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  required?: boolean;
+}
+
+const InputField: React.FC<InputFieldProps> = ({ label, type, placeholder, icon: Icon, id, value, onChange, required = true }) => (
   <div className="form-group">
     <label htmlFor={id} className="form-label">{label}</label>
     <div className="input-wrapper">
       <div className="input-icon"><Icon size={18} /></div>
-      <input type={type} id={id} className="form-input" placeholder={placeholder} value={value} onChange={onChange} required={required} />
+      <input 
+        type={type} 
+        id={id} 
+        className="form-input" 
+        placeholder={placeholder} 
+        value={value} 
+        onChange={onChange} 
+        required={required} 
+      />
     </div>
   </div>
 );
@@ -26,22 +46,21 @@ export default function LoginPage() {
     setAnimate(true);
   }, []);
 
-  const handleChange = (e) => {
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setFormData({ ...formData, [e.target.id]: e.target.value });
   };
 
-  const handleLogin = async (e) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setLoading(true);
 
     try {
-      // 1. Autentica o usuário (E-mail e Senha)
+      // 1. Autentica o usuário
       const userCredential = await signInWithEmailAndPassword(auth, formData.email, formData.password);
       const user = userCredential.user;
 
-      // 2. Verifica a "Role" (Papel) no Banco de Dados antes de redirecionar
-      // Isso evita que o usuário seja barrado na próxima tela
+      // 2. Verifica a "Role" no Banco de Dados
       const userDocRef = doc(db, "users", user.uid);
       const userDoc = await getDoc(userDocRef);
 
@@ -49,7 +68,6 @@ export default function LoginPage() {
         const userData = userDoc.data();
         
         if (userData.role === 'creator') {
-          console.log("Login de Criador confirmado. Redirecionando...");
           navigate('/creator-dashboard');
         } else if (userData.role === 'clipper') {
           navigate('/clipper-dashboard');
@@ -62,12 +80,12 @@ export default function LoginPage() {
         setError("Erro: Usuário sem registro no banco de dados.");
       }
 
-    } catch (err) {
+    } catch (err: any) { // 'any' para acessar propriedades de erro do Firebase
       console.error("Erro no login:", err);
-      // Tratamento de erros comuns
+      
       if (err.code === 'auth/invalid-credential' || err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password') {
         setError("E-mail ou senha incorretos.");
-      } else if (err.message.includes("network") || err.message.includes("failed to fetch")) {
+      } else if (err.message && (err.message.includes("network") || err.message.includes("failed to fetch"))) {
         setError("Erro de conexão. Verifique se algum AdBlock está bloqueando o banco de dados.");
       } else {
         setError("Ocorreu um erro ao entrar. Tente novamente.");
@@ -90,7 +108,7 @@ export default function LoginPage() {
       </div>
 
       <header className="header" style={{ position: 'absolute', background: 'transparent', border: 'none' }}>
-        <div className="container nav-container">
+        <div className="container nav-container" style={{ display: 'flex', justifyContent: 'center' }}>
           <Link to="/" className="logo" style={{ textDecoration: 'none' }}>
             <Icons.Play fill="url(#gradient)" size={28} />
             Clipay

@@ -1,3 +1,5 @@
+import React from 'react'
+
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import LandingPage from './pages/LandingPage';
 import LoginPage from './pages/LoginPage';
@@ -28,7 +30,7 @@ export default function App() {
           } 
         />
 
-        {/* Rotas Privadas - Clipador (Futuro) */}
+        {/* Rotas Privadas - Clipador */}
         <Route 
           path="/clipper-dashboard" 
           element={
@@ -38,7 +40,8 @@ export default function App() {
           } 
         /> 
 
-      <Route 
+        {/* Rotas Privadas - Admin */}
+        <Route 
           path="/admin-dashboard" 
           element={
             <PrivateRoute requiredRole="admin">

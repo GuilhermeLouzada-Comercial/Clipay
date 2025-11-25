@@ -1,24 +1,43 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { Icons } from '../components/Icons';
 
-function getRandomInt(min, max) {
+// Função auxiliar simples
+function getRandomInt(min: number, max: number) {
   min = Math.ceil(min);
   max = Math.floor(max);
   return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+// --- TIPOS ---
+type Role = 'creator' | 'clipper';
+
+interface HeroProps {
+  activeRole: Role;
+  setActiveRole: (role: Role) => void;
+}
+
+interface RolesSectionProps {
+  activeRole: Role;
+  setActiveRole: (role: Role) => void;
 }
 
 // --- COMPONENTES ---
 
 const Header = () => (
   <header className="header">
-    <div className="container nav-container">
-      <Link to="/">
+    {/* 
+      ALTERAÇÃO 1: Adicionei style inline com display: flex e justifyContent: space-between.
+      Isso garante que no mobile (onde o nav-links some), o botão vá para a direita.
+    */}
+    <div className="container nav-container" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <Link to="/" style={{ textDecoration: 'none' }}>
         <div className="logo">
           <Icons.Play fill={'url(#gradient)'} size={28} />
-          ClipayClub
+          Clipay
         </div>
       </Link>
+      
       <nav className="nav-links">
         <a href="#features" className="nav-link">
           Funcionalidades
@@ -30,6 +49,7 @@ const Header = () => (
           Preços
         </a>
       </nav>
+
       <div className="nav-buttons">
         <Link to="/login">
           <button className="btn btn-outline hide-mobile">Login</button>
@@ -49,8 +69,15 @@ const Header = () => (
   </header>
 );
 
-const DashboardPreview = ({ role }) => {
-  const [hoveredBar, setHoveredBar] = useState(null);
+const DashboardPreview = ({ role }: { role: Role }) => {
+  const [hoveredBar, setHoveredBar] = useState<number | null>(null);
+
+  // ALTERAÇÃO 2: useMemo para gerar os IDs apenas UMA vez ao carregar a página.
+  // Eles não vão mudar ao trocar de aba ou passar o mouse.
+  const randomIds = useMemo(() => ({
+    creator: getRandomInt(1000, 99999),
+    clipper: getRandomInt(1000, 99999)
+  }), []);
 
   const data = {
     creator: {
@@ -65,7 +92,7 @@ const DashboardPreview = ({ role }) => {
       ],
       graphLabel: 'Visualizações Semanais',
       graphColor: 'var(--gradient-main)',
-      getTooltip: (height) => `${(height / 15).toFixed(1)}M Views`,
+      getTooltip: (height: number) => `${(height / 15).toFixed(1)}M Views`,
     },
     clipper: {
       title: 'Dashboard do Clipador',
@@ -79,7 +106,7 @@ const DashboardPreview = ({ role }) => {
       ],
       graphLabel: 'Ganhos Semanais',
       graphColor: 'var(--gradient-clipper)',
-      getTooltip: (height) => `R$ ${(height * 9).toFixed(0)},00`,
+      getTooltip: (height: number) => `R$ ${(height * 9).toFixed(0)},00`,
     },
   };
 
@@ -90,7 +117,8 @@ const DashboardPreview = ({ role }) => {
     <div className="dashboard-preview">
       <div className="dash-title-bar">
         <div className="dash-indicator"></div>
-        {current.title + ' #' + getRandomInt(1000, 99999)}
+        {/* Usa o ID fixo gerado pelo useMemo */}
+        {current.title + ' #' + randomIds[role]}
       </div>
 
       <div className="dash-header">
@@ -161,7 +189,7 @@ const DashboardPreview = ({ role }) => {
   );
 };
 
-const Hero = ({ activeRole, setActiveRole }) => (
+const Hero = ({ activeRole, setActiveRole }: HeroProps) => (
   <section className="hero">
     <div className="hero-bg-wrapper">
       <img
@@ -209,7 +237,7 @@ const Hero = ({ activeRole, setActiveRole }) => (
   </section>
 );
 
-const RolesSection = ({ activeRole, setActiveRole }) => {
+const RolesSection = ({ activeRole, setActiveRole }: RolesSectionProps) => {
   const creatorFeatures = [
     {
       Icon: Icons.BarChart3,
@@ -426,7 +454,7 @@ const Footer = () => {
 };
 
 export default function LandingPage() {
-  const [activeRole, setActiveRole] = useState('creator');
+  const [activeRole, setActiveRole] = useState<Role>('creator');
 
   return (
     <div className="app">
