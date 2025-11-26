@@ -11,6 +11,9 @@ import { doc, getDoc } from 'firebase/firestore';
 function getRandomInt(min: number, max: number) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
+function getRandomFloat(min: number, max: number) {
+  return (Math.random() * (max - min + 1) + min);
+}
 
 // Formata moeda (R$)
 const formatCurrency = (value: number) => {
@@ -38,17 +41,17 @@ const generateGrowthData = (length: number) => {
   for (let i = 0; i < length; i++) {
     // Adiciona um valor aleatório que tende a ser positivo (crescimento)
     // Variação entre -10 e +25
-    const change = getRandomInt(-10, 25);
+    const change = getRandomFloat(-10, 25);
     current += change;
     
     // Mantém entre 20% e 100%
-    if (current > 100) current = 100;
+    if (current > 100) current *= 0.85;
     if (current < 20) current = 20;
     
     data.push(current);
   }
   // Garante que o último seja alto para dar sensação de sucesso
-  data[data.length - 1] = getRandomInt(85, 100);
+  data[data.length - 1] = getRandomFloat(85, 100);
   return data;
 };
 
@@ -163,7 +166,7 @@ const DashboardPreview = ({ role }: { role: Role }) => {
     });
 
     if (role === 'creator') {
-      const revenue = getRandomInt(80000, 250000); 
+      const revenue = getRandomFloat(80000, 250000); 
       const views = getRandomInt(15000000, 45000000); 
       const videos = getRandomInt(500, 1200);
       const clippers = getRandomInt(80, 300);
@@ -184,10 +187,10 @@ const DashboardPreview = ({ role }: { role: Role }) => {
         bars, 
       };
     } else {
-      const balance = getRandomInt(2500, 18000); 
+      const balance = getRandomFloat(2500, 18000); 
       const rank = getRandomInt(1, 15);
       const videos = getRandomInt(20, 150);
-      const bonus = getRandomInt(100, 1000);
+      const bonus = getRandomFloat(100, 1000);
 
       return {
         id,
