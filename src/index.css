@@ -628,6 +628,11 @@ body {
   transition: var(--transition);
 }
 
+.form-input::placeholder {
+  color: var(--text-muted);
+  opacity: 0.7;
+}
+
 .form-input:focus {
   outline: none;
   border-color: var(--primary);

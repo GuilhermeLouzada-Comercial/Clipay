@@ -106,7 +106,10 @@ export default function SignupPage() {
         email: formData.email,
         role: activeRole,
         createdAt: serverTimestamp(),
-        pixKey: "" 
+        pixKey: "", 
+        xp: 0,
+        views: 0,
+        videos: 0,
       });
 
       console.log("Conta criada com sucesso:", user.uid);
