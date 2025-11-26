@@ -383,14 +383,14 @@ const Hero = ({ activeRole, setActiveRole, theme }: HeroProps) => {
 // ... (Mantenha RolesSection, ComparisonSection, Footer iguais)
 const RolesSection = ({ activeRole, setActiveRole }: RolesSectionProps) => {
     const creatorFeatures = [
-        { Icon: Icons.BarChart3, title: 'ROI em Tempo Real', desc: 'Saiba exatamente quanto cada visualização está custando e o retorno sobre investimento da sua campanha.' },
-        { Icon: Icons.Wallet, title: 'Pagamentos Centralizados', desc: 'Esqueça fazer 50 PIX manuais. Deposite um valor único e nós distribuímos conforme as metas.' },
-        { Icon: Icons.ShieldCheck, title: 'Controle de Qualidade', desc: 'Aprove ou rejeite vídeos antes do pagamento ser liberado. Defina regras claras de monetização.' },
+        { Icon: Icons.User, title: 'Para Criadores', desc: 'Seja você uma agência de marketing, um criador de conteúdo começando ou já bem estabelecido, a Clipay é para você, começe com qualquer valor!' },
+        { Icon: Icons.BarChart3, title: 'Crescimento Orgânico', desc: 'Número de seguidores cresce organicamente com a prática da Clipay, e também é 100% legalizado nas redes sociais' },
+        { Icon: Icons.ShieldCheck, title: 'Controle de Qualidade', desc: 'Você é quem define as regras para as campanhas, quem não seguir, não recebe o valor' },
     ];
     const clipperFeatures = [
-        { Icon: Icons.Trophy, title: 'Rankings Competitivos', desc: 'Visualize sua posição no ranking global e da campanha. Gamificação real para aumentar seus ganhos.', },
-        { Icon: Icons.LineChart, title: 'Previsibilidade', desc: 'Saiba exatamente quanto vai receber e quando. Um dashboard claro com suas metas de views e vídeos.', },
-        { Icon: Icons.CheckCircle, title: 'Pagamento Garantido', desc: 'O dinheiro do criador já está na plataforma. Cumpriu a meta? O saldo é liberado para sua carteira.', },
+        { Icon: Icons.Trophy, title: 'Escolha seu Campeonato', desc: 'Escolha a sua própria forma de remuneração! Temos campeonatos por quantidade de views e também por quantidade de vídeos postados.', },
+        { Icon: Icons.LineChart, title: 'Reconhecimento', desc: 'Clipadores da plataforma são reconhecidos aqui no site e também com brindes físicos!', },
+        { Icon: Icons.Wallet, title: 'Pagamento Garantido', desc: 'Saiba exatamente quando irá receber, podendo também solicitar uma antecipação!', },
     ];
     const currentFeatures = activeRole === 'creator' ? creatorFeatures : clipperFeatures;
 
