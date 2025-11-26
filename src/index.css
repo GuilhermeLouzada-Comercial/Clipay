@@ -1072,3 +1072,62 @@ body {
   /* Ajuste fino para o logo não bater no botão centralizado em telas muito pequenas */
   .logo span { display: none; } 
 }
+
+/* --- FAQ SECTION --- */
+.faq-container {
+  max-width: 800px;
+  margin: 0 auto;
+}
+
+.faq-item {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: 15px;
+  overflow: hidden;
+  transition: var(--transition);
+}
+
+.faq-item:hover {
+  border-color: var(--primary);
+}
+
+.faq-question {
+  padding: 20px 25px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 1.05rem;
+  color: var(--text-main);
+  background: transparent;
+  border: none;
+  width: 100%;
+  text-align: left;
+}
+
+.faq-answer {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.3s ease-out, padding 0.3s ease;
+  padding: 0 25px;
+  color: var(--text-muted);
+  font-size: 0.95rem;
+  line-height: 1.6;
+}
+
+.faq-item.active .faq-answer {
+  max-height: 200px; /* Altura suficiente para o texto */
+  padding-bottom: 25px;
+}
+
+.faq-icon {
+  transition: transform 0.3s ease;
+  color: var(--primary);
+  min-width: 24px; /* Garante que o ícone não amasse */
+}
+
+.faq-item.active .faq-icon {
+  transform: rotate(45deg); /* Transforma o + em x */
+}

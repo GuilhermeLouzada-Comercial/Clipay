@@ -490,6 +490,66 @@ const Footer = () => {
   );
 };
 
+const FAQSection = () => {
+  const [openIndex, setOpenIndex] = useState<number | null>(null);
+
+  const faqs = [
+    {
+      question: "O meu dinheiro está seguro na plataforma?",
+      answer: "Absolutamente. Utilizamos um sistema de 'Escrow' (Garantia). O valor pago pelo criador fica retido em uma conta segura da Clipay e só é liberado para o clipador quando o serviço é entregue e aprovado, ou conforme as regras automáticas de visualização. Isso protege ambos os lados de golpes."
+    },
+    {
+      question: "Como funcionam os pagamentos?",
+      answer: "Tudo é feito via Pix. Para criadores, geramos um QR Code único para carregar o saldo da campanha. Para clipadores, o saldo acumulado pode ser sacado diretamente para sua chave PIX cadastrada assim que atingir o valor mínimo, caindo na conta em instantes."
+    },
+    {
+      question: "A plataforma cobra alguma taxa?",
+      answer: "A plataforma é 100% gratuita tanto para clipadores, quanto para criadores de conteúdo!"
+    },
+    {
+      question: "Como vocês sabem quantas views meu vídeo pegou?",
+      answer: "Nós nos conectamos diretamente às APIs oficiais do YouTube, TikTok e Instagram. Isso garante que os dados sejam 100% precisos, sem a necessidade de enviar prints ou planilhas manuais."
+    },
+    {
+      question: "E se o criador não aprovar meu corte?",
+      answer: "Nossa plataforma possui regras claras. Se o corte cumpriu os requisitos estabelecidos na campanha (regras de edição, qualidade, etc), o pagamento é garantido. Em caso de disputas, nosso time de suporte analisa o caso para garantir justiça."
+    }
+  ];
+
+  const toggleFAQ = (index: number) => {
+    setOpenIndex(openIndex === index ? null : index);
+  };
+
+  return (
+    <section className="section container">
+      <div style={{ textAlign: 'center', marginBottom: '50px' }}>
+        <h2 style={{ fontSize: '2.5rem', marginBottom: '15px' }}>Perguntas Frequentes</h2>
+        <p style={{ color: 'var(--text-muted)' }}>Tire suas dúvidas e entenda por que a Clipay é a escolha segura.</p>
+      </div>
+
+      <div className="faq-container">
+        {faqs.map((faq, index) => (
+          <div 
+            key={index} 
+            className={`faq-item ${openIndex === index ? 'active' : ''}`}
+            onClick={() => toggleFAQ(index)}
+          >
+            <button className="faq-question">
+              {faq.question}
+              <div className="faq-icon">
+                <Icons.Plus size={24} />
+              </div>
+            </button>
+            <div className="faq-answer">
+              {faq.answer}
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+};
+
 export default function LandingPage() {
   const [activeRole, setActiveRole] = useState<Role>('creator');
   const [user, setUser] = useState<UserState | null>(null);
@@ -560,6 +620,7 @@ export default function LandingPage() {
           <div style={{ position: 'absolute', top: '-50%', right: '-10%', width: '400px', height: '400px', background: 'white', opacity: '0.1', borderRadius: '50%' }}></div>
         </div>
       </section>
+      <FAQSection />
       <Footer />
     </div>
   );
