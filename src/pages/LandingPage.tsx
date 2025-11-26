@@ -28,9 +28,9 @@ const formatCompact = (value: number) => {
 };
 const generateGrowthData = (length: number) => {
   let data: number[] = [];
-  let current = 25;
+  let current = 30;
   for (let i = 0; i < length; i++) {
-    const change = getRandomFloat(-10, 25);
+    const change = getRandomFloat(-10, 20);
     current += change;
     if (current > 100) {
       data = data.map(element => element/current * 100);
