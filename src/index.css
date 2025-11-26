@@ -1,20 +1,41 @@
 :root {
-  --bg-dark: #0b0b0f;
-  --bg-card: #121218;
-  --bg-card-hover: #1a1a23;
+  /* --- TEMA CLARO (PADRÃO) --- */
+  --bg-dark: #f8fafc;       /* Fundo claro */
+  --bg-card: #ffffff;       /* Cards brancos */
+  --bg-card-hover: #f1f5f9;
   --primary: #3b82f6;
   --accent: #8b5cf6;
-  --text-main: #ffffff;
-  --text-muted: #9ca3af;
-  --border: #27272a;
+  --text-main: #1e293b;     /* Texto escuro */
+  --text-muted: #64748b;
+  --border: #e2e8f0;        /* Bordas sutis */
   --gradient-main: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
   --gradient-clipper: linear-gradient(135deg, #10b981 0%, #3b82f6 100%);
-  --gradient-text: linear-gradient(to right, #60a5fa, #a78bfa);
+  --gradient-text: linear-gradient(to right, #2563eb, #7c3aed); /* Ajustado para contraste no branco */
   --success: #10b981;
   --danger: #ef4444;
   --warning: #fbbf24;
   --radius: 12px;
   --transition: all 0.3s ease;
+  --header-bg: rgba(255, 255, 255, 0.85);
+  --shadow-card: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  
+  /* Cor específica para o botão ativo dos Roles para garantir leitura */
+  --role-btn-active-bg: #1e293b; 
+}
+
+/* --- TEMA ESCURO --- */
+[data-theme="dark"] {
+  --bg-dark: #0b0b0f;
+  --bg-card: #121218;
+  --bg-card-hover: #1a1a23;
+  --text-main: #ffffff;
+  --text-muted: #9ca3af;
+  --border: #27272a;
+  --header-bg: rgba(11, 11, 15, 0.8);
+  --gradient-text: linear-gradient(to right, #60a5fa, #a78bfa);
+  --shadow-card: 0 20px 50px rgba(0, 0, 0, 0.5);
+  
+  --role-btn-active-bg: #ffffff; /* No escuro, fundo branco com texto preto fica bom, ou use primary */
 }
 
 * {
@@ -29,7 +50,9 @@ body {
   color: var(--text-main);
   line-height: 1.6;
   overflow-x: hidden;
+  transition: background-color 0.3s ease, color 0.3s ease;
 }
+
 
 /* Utilitários de Layout */
 .container {
@@ -48,12 +71,14 @@ body {
   top: 0;
   left: 0;
   width: 100%;
-  background: rgba(11, 11, 15, 0.8);
+  background: var(--header-bg); /* Usando a variável */
   backdrop-filter: blur(10px);
   z-index: 1000;
   border-bottom: 1px solid var(--border);
   padding: 20px 0;
+  transition: background 0.3s ease, border-color 0.3s ease;
 }
+
 
 .nav-container {
   display: grid;
@@ -389,6 +414,7 @@ body {
   margin-left: auto;
   margin-right: auto;
   border: 1px solid var(--border);
+  box-shadow: var(--shadow-card); /* Adicionado sombra suave */
 }
 
 .role-btn {
@@ -403,9 +429,18 @@ body {
 }
 
 .role-btn.active {
-  background: var(--bg-dark);
-  color: white;
+  background: var(--role-btn-active-bg); /* Variável nova */
+  color: var(--bg-dark); /* Texto inverte com o fundo */
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+}
+
+[data-theme="light"] .role-btn.active {
+  background: var(--primary);
+  color: white;
+}
+[data-theme="dark"] .role-btn.active {
+  background: white;
+  color: black;
 }
 
 .features-grid {
@@ -844,5 +879,169 @@ body {
     background: rgba(0,0,0,0.7);
     z-index: 45;
     backdrop-filter: blur(2px);
+  }
+}
+
+/* --- THEME TOGGLE (DESKTOP) --- */
+.theme-toggle {
+  display: flex;
+  align-items: center;
+  background: var(--bg-card-hover);
+  border: 1px solid var(--border);
+  border-radius: 30px;
+  padding: 4px;
+  gap: 5px;
+  cursor: pointer;
+  position: relative;
+  margin-left: 10px; /* Espaço extra pois agora ele é o último item */
+}
+
+.theme-toggle-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  color: var(--text-muted);
+  transition: all 0.3s ease;
+  z-index: 2;
+}
+
+.theme-toggle-btn.active {
+  color: white; /* Ícone ativo sempre branco se tiver fundo colorido, ou ajuste conforme design */
+}
+
+/* Fundo deslizante do toggle */
+.theme-toggle-bg {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  width: 28px;
+  height: 28px;
+  background: var(--primary);
+  border-radius: 50%;
+  transition: transform 0.3s cubic-bezier(0.4, 0.0, 0.2, 1);
+  z-index: 1;
+}
+
+/* Se estiver no modo claro (sol na esquerda), translate 0. Se escuro (lua na direita), translate 100% + gap */
+[data-theme="dark"] .theme-toggle-bg {
+  transform: translateX(33px); /* Ajuste conforme o gap e tamanho */
+}
+[data-theme="light"] .theme-toggle-bg {
+  transform: translateX(0);
+}
+
+/* --- MOBILE MENU & SIDEBAR --- */
+.mobile-menu-btn {
+  display: none; /* Escondido no desktop */
+  background: none;
+  border: none;
+  color: var(--text-main);
+  cursor: pointer;
+}
+
+.mobile-sidebar-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: 2000;
+  opacity: 0;
+  visibility: hidden;
+  transition: all 0.3s ease;
+  backdrop-filter: blur(4px);
+}
+
+.mobile-sidebar-overlay.open {
+  opacity: 1;
+  visibility: visible;
+}
+
+.mobile-sidebar {
+  position: fixed;
+  top: 0;
+  right: 0;
+  width: 280px;
+  height: 100%;
+  background: var(--bg-card);
+  z-index: 2001;
+  transform: translateX(100%);
+  transition: transform 0.3s cubic-bezier(0.4, 0.0, 0.2, 1);
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  padding: 20px;
+}
+
+.mobile-sidebar.open {
+  transform: translateX(0);
+}
+
+.mobile-sidebar-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 30px;
+  padding-bottom: 15px;
+  border-bottom: 1px solid var(--border);
+}
+
+.mobile-nav-links {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.mobile-nav-link {
+  font-size: 1.1rem;
+  color: var(--text-main);
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.mobile-theme-row {
+  margin-top: auto; /* Empurra para o fundo ou use margin-top fixo */
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+/* --- AJUSTES RESPONSIVOS --- */
+@media (max-width: 768px) {
+  .nav-links {
+    display: none; /* Esconde links normais */
+  }
+  .nav-buttons {
+    display: none; /* Esconde botões de login/dashboard desktop */
+  }
+  
+  .mobile-menu-btn {
+    display: block;
+  }
+
+  /* Layout do Header Mobile */
+  .nav-container {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    position: relative;
+  }
+
+  /* Centralizar o botão "Começar Agora" */
+  .mobile-cta-container {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+  }
+  
+  /* Ajuste do logo para não ocupar muito espaço */
+  .logo span {
+    display: none; /* Opcional: esconde o texto "Clipay" no mobile se ficar apertado */
   }
 }

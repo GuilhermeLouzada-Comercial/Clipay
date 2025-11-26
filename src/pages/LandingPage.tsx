@@ -5,52 +5,39 @@ import { auth, db } from '../services/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
 
-// --- UTILITÁRIOS ---
-
-// Gera número aleatório entre min e max
+// ... (Mantenha as funções utilitárias: getRandomInt, formatCurrency, etc...)
 function getRandomInt(min: number, max: number) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 function getRandomFloat(min: number, max: number) {
   return (Math.random() * (max - min + 1) + min);
 }
-
-// Formata moeda (R$)
 const formatCurrency = (value: number) => {
   return new Intl.NumberFormat('pt-BR', {
     style: 'currency',
     currency: 'BRL',
-    minimumFractionDigits: 2, // Garante que sempre mostre os centavos (ex: ,00)
+    minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(value);
 };
-
-
-// Formata números compactos (ex: 1.2M, 850K)
 const formatCompact = (value: number) => {
   return new Intl.NumberFormat('en-US', {
     notation: 'compact',
     maximumFractionDigits: 1,
   }).format(value);
 };
-
-// Gera um array de alturas para o gráfico com tendência de crescimento
 const generateGrowthData = (length: number) => {
-  const data: number[] = [];
-  let current = 30; // Começa em 30%
+  let data: number[] = [];
+  let current = 25;
   for (let i = 0; i < length; i++) {
-    // Adiciona um valor aleatório que tende a ser positivo (crescimento)
-    // Variação entre -10 e +25
     const change = getRandomFloat(-10, 25);
     current += change;
-    
-    // Mantém entre 20% e 100%
-    if (current > 100) current *= 0.85;
+    if (current > 100) {
+      data = data.map(element => element/current * 100);
+    }
     if (current < 20) current = 20;
-    
     data.push(current);
   }
-  // Garante que o último seja alto para dar sensação de sucesso
   data[data.length - 1] = getRandomFloat(85, 100);
   return data;
 };
@@ -67,11 +54,14 @@ interface UserState {
 interface HeaderProps {
   user: UserState | null;
   loading: boolean;
+  theme: 'light' | 'dark';
+  toggleTheme: () => void;
 }
 
 interface HeroProps {
   activeRole: Role;
   setActiveRole: (role: Role) => void;
+  theme: 'light' | 'dark'; // Adicionado prop theme
 }
 
 interface RolesSectionProps {
@@ -81,87 +71,198 @@ interface RolesSectionProps {
 
 // --- COMPONENTES ---
 
-const Header = ({ user, loading }: HeaderProps) => (
-  <header className="header">
-    <div className="container nav-container" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-      <Link to="/" style={{ textDecoration: 'none' }}>
-        <div className="logo">
-          <Icons.Play fill={'url(#gradient)'} size={28} />
-          Clipay
+const Header = ({ user, loading, theme, toggleTheme }: HeaderProps) => {
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  return (
+    <>
+      {/* Estilos forçados para garantir o layout correto sem mexer no CSS externo */}
+      <style>{`
+        /* Padrão Desktop */
+        .nav-buttons { display: flex; align-items: center; gap: 15px; }
+        .mobile-cta-container { display: none; }
+        .mobile-menu-btn { display: none; }
+
+        /* Mobile */
+        @media (max-width: 768px) {
+          .nav-links, 
+          .nav-buttons { 
+            display: none !important; /* Garante que o toggle desktop suma */
+          }
+          .mobile-menu-btn { 
+            display: block !important; 
+            z-index: 20;
+          }
+          .mobile-cta-container {
+            display: block !important;
+            position: absolute;
+            left: 50%;
+            transform: translateX(-50%);
+            white-space: nowrap;
+            z-index: 10;
+          }
+          /* Ajuste fino para o logo não bater no botão centralizado em telas muito pequenas */
+          .logo span { display: none; } 
+        }
+      `}</style>
+
+      <header className="header">
+        <div className="container nav-container" style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          
+          {/* LOGO (Esquerda) */}
+          <Link to="/" style={{ textDecoration: 'none', zIndex: 20 }}>
+            <div className="logo">
+              <Icons.Play fill={'url(#gradient)'} size={28} />
+              <span>Clipay</span>
+            </div>
+          </Link>
+          
+          {/* NAV LINKS (Centro - Desktop) */}
+          <nav className="nav-links">
+            <a href="#features" className="nav-link">Funcionalidades</a>
+            <a href="#roles" className="nav-link">Para Quem?</a>
+            <a href="#pricing" className="nav-link">Preços</a>
+          </nav>
+
+          {/* BOTÃO CENTRALIZADO (Apenas Mobile) */}
+          <div className="mobile-cta-container">
+             {loading ? (
+                <span style={{fontSize: '0.8rem'}}>...</span>
+             ) : user ? (
+                <Link to={user.role === 'creator' ? '/creator-dashboard' : '/clipper-dashboard'}>
+                  <button className="btn btn-primary" style={{ padding: '8px 16px', fontSize: '0.85rem' }}>
+                    Dashboard
+                  </button>
+                </Link>
+             ) : (
+                <Link to="/signup">
+                  <button className="btn btn-primary" style={{ padding: '8px 16px', fontSize: '0.85rem' }}>
+                    Começar Agora
+                  </button>
+                </Link>
+             )}
+          </div>
+
+          {/* ACTIONS (Direita - Desktop) */}
+          {/* Removi o style={{display: flex}} inline para o CSS controlar a visibilidade */}
+          <div className="nav-buttons">
+            {loading ? (
+              <span style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>...</span>
+            ) : user ? (
+              <>
+                <span style={{ color: 'var(--text-main)', fontWeight: 500, fontSize: '0.95rem' }}>
+                  Olá, {user.name.split(' ')[0]}
+                </span>
+                <Link to={user.role === 'creator' ? '/creator-dashboard' : user.role === 'admin' ? '/admin-dashboard' : '/clipper-dashboard'}>
+                  <button className="btn btn-primary" style={{ padding: '8px 20px', fontSize: '0.9rem' }}>
+                    Dashboard <Icons.ArrowRight size={16} style={{ marginLeft: 5 }} />
+                  </button>
+                </Link>
+              </>
+            ) : (
+              <>
+                <Link to="/login">
+                  <button className="btn btn-outline">Login</button>
+                </Link>
+                <Link to="/signup">
+                  <button className="btn btn-primary">Começar Agora</button>
+                </Link>
+              </>
+            )}
+
+            {/* Theme Toggle (Desktop) */}
+            <div className="theme-toggle" onClick={toggleTheme}>
+              <div className="theme-toggle-bg"></div>
+              <div className={`theme-toggle-btn ${theme === 'light' ? 'active' : ''}`}>
+                <Icons.Sun size={16} />
+              </div>
+              <div className={`theme-toggle-btn ${theme === 'dark' ? 'active' : ''}`}>
+                <Icons.Moon size={16} />
+              </div>
+            </div>
+          </div>
+
+          {/* MENU ICON (Direita - Mobile) */}
+          <button className="mobile-menu-btn" onClick={() => setMobileMenuOpen(true)}>
+            <Icons.Menu size={28} />
+          </button>
         </div>
-      </Link>
+
+        <svg width="0" height="0" style={{ position: 'absolute' }}>
+          <linearGradient id="gradient" x1="100%" y1="100%" x2="0%" y2="0%">
+            <stop stopColor="#3b82f6" offset="0%" />
+            <stop stopColor="#8b5cf6" offset="100%" />
+          </linearGradient>
+        </svg>
+      </header>
+
+      {/* MOBILE SIDEBAR */}
+      <div 
+        className={`mobile-sidebar-overlay ${mobileMenuOpen ? 'open' : ''}`} 
+        onClick={() => setMobileMenuOpen(false)}
+      />
       
-      <nav className="nav-links">
-        <a href="#features" className="nav-link">Funcionalidades</a>
-        <a href="#roles" className="nav-link">Para Quem?</a>
-        <a href="#pricing" className="nav-link">Preços</a>
-      </nav>
+      <div className={`mobile-sidebar ${mobileMenuOpen ? 'open' : ''}`}>
+        <div className="mobile-sidebar-header">
+          <div className="logo">
+            <Icons.Play fill={'url(#gradient)'} size={24} />
+            Clipay
+          </div>
+          <button 
+            style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
+            onClick={() => setMobileMenuOpen(false)}
+          >
+            <Icons.X size={28} />
+          </button>
+        </div>
 
-      <div className="nav-buttons" style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
-        {loading ? (
-          <span style={{ color: '#9ca3af', fontSize: '0.9rem' }}>...</span>
-        ) : user ? (
-          // ESTADO LOGADO
-          <>
-            <span style={{ color: 'white', fontWeight: 500, fontSize: '0.95rem' }}>
-              Olá, {user.name.split(' ')[0]}
-            </span>
-            <Link to={user.role === 'creator' ? '/creator-dashboard' : user.role === 'admin' ? '/admin-dashboard' : '/clipper-dashboard'}>
-              <button className="btn btn-primary" style={{ padding: '8px 20px', fontSize: '0.9rem' }}>
-                Dashboard <Icons.ArrowRight size={16} style={{ marginLeft: 5 }} />
-              </button>
+        <nav className="mobile-nav-links">
+          <a href="#features" className="mobile-nav-link" onClick={() => setMobileMenuOpen(false)}>Funcionalidades</a>
+          <a href="#roles" className="mobile-nav-link" onClick={() => setMobileMenuOpen(false)}>Para Quem?</a>
+          <a href="#pricing" className="mobile-nav-link" onClick={() => setMobileMenuOpen(false)}>Preços</a>
+          
+          <hr style={{ borderColor: 'var(--border)', margin: '10px 0' }} />
+
+          {user ? (
+             <div style={{fontSize: '0.9rem', color: 'var(--text-muted)'}}>
+                Logado como {user.name}
+             </div>
+          ) : (
+            <Link to="/login" className="mobile-nav-link" onClick={() => setMobileMenuOpen(false)}>
+              Fazer Login
             </Link>
-          </>
-        ) : (
-          // ESTADO DESLOGADO
-          <>
-            <Link to="/login">
-              <button className="btn btn-outline hide-mobile">Login</button>
-            </Link>
-            <Link to="/signup">
-              <button className="btn btn-primary">Começar Agora</button>
-            </Link>
-          </>
-        )}
+          )}
+        </nav>
+
+        <div className="mobile-theme-row">
+          <span style={{ color: 'var(--text-muted)', fontSize: '0.95rem' }}>Tema</span>
+          <div className="theme-toggle" onClick={toggleTheme}>
+              <div className="theme-toggle-bg"></div>
+              <div className={`theme-toggle-btn ${theme === 'light' ? 'active' : ''}`}>
+                <Icons.Sun size={16} />
+              </div>
+              <div className={`theme-toggle-btn ${theme === 'dark' ? 'active' : ''}`}>
+                <Icons.Moon size={16} />
+              </div>
+            </div>
+        </div>
       </div>
-    </div>
+    </>
+  );
+};
 
-    <svg width="0" height="0" style={{ position: 'absolute' }}>
-      <linearGradient id="gradient" x1="100%" y1="100%" x2="0%" y2="0%">
-        <stop stopColor="#3b82f6" offset="0%" />
-        <stop stopColor="#8b5cf6" offset="100%" />
-      </linearGradient>
-    </svg>
-  </header>
-);
-
+// ... (Mantenha DashboardPreview igual)
 const DashboardPreview = ({ role }: { role: Role }) => {
   const [hoveredBar, setHoveredBar] = useState<number | null>(null);
-
-  // LÓGICA ORGÂNICA: Gera dados aleatórios e crescentes apenas uma vez ao carregar
   const dashboardData = useMemo(() => {
     const id = getRandomInt(10000, 99999);
-    const rawHeights = generateGrowthData(12); // Gera as alturas (12 barras)
-
-    // AQUI ESTÁ A CORREÇÃO:
-    // Removemos o Math.random() do cálculo do valor.
-    // Agora o valor é diretamente proporcional à altura (height).
+    const rawHeights = generateGrowthData(12);
     const bars = rawHeights.map((height) => {
       if (role === 'creator') {
-        // Ex: Se a altura for 80, será 80 * 0.25 = 20.0M Views
-        // Isso garante que barra maior = número maior
         const viewCount = (height * 0.06).toFixed(1);
-        return {
-          height,
-          tooltip: `${viewCount}M Views`
-        };
+        return { height, tooltip: `${viewCount}M Views` };
       } else {
-        // Lógica do clipador
-        // Ex: Altura 80 * 18 = R$ 1.440,00
-        return {
-          height,
-          tooltip: formatCurrency(height * 18)
-        };
+        return { height, tooltip: formatCurrency(height * 18) };
       }
     });
 
@@ -170,7 +271,6 @@ const DashboardPreview = ({ role }: { role: Role }) => {
       const views = getRandomInt(15000000, 45000000); 
       const videos = getRandomInt(500, 1200);
       const clippers = getRandomInt(80, 300);
-
       return {
         id,
         title: 'Dashboard Criador',
@@ -179,8 +279,8 @@ const DashboardPreview = ({ role }: { role: Role }) => {
         btnText: '+ Nova Campanha',
         stats: [
           { val: `+${formatCompact(views)}`, label: 'Views Totais', color: 'var(--success)' },
-          { val: videos.toString(), label: 'Vídeos Aprovados', color: 'white' },
-          { val: clippers.toString(), label: 'Clipadores Ativos', color: 'white' },
+          { val: videos.toString(), label: 'Vídeos Aprovados', color: 'var(--text-main)' },
+          { val: clippers.toString(), label: 'Clipadores Ativos', color: 'var(--text-main)' },
         ],
         graphLabel: 'Visualizações Semanais',
         graphColor: 'var(--gradient-main)',
@@ -191,7 +291,6 @@ const DashboardPreview = ({ role }: { role: Role }) => {
       const rank = getRandomInt(1, 15);
       const videos = getRandomInt(20, 150);
       const bonus = getRandomFloat(100, 1000);
-
       return {
         id,
         title: 'Dashboard Clipador',
@@ -200,7 +299,7 @@ const DashboardPreview = ({ role }: { role: Role }) => {
         btnText: 'Solicitar Pix',
         stats: [
           { val: `#${rank}`, label: 'Ranking Global', color: 'var(--warning)' },
-          { val: videos.toString(), label: 'Vídeos Postados', color: 'white' },
+          { val: videos.toString(), label: 'Vídeos Postados', color: 'var(--text-main)' },
           { val: formatCurrency(bonus), label: 'Bônus Hoje', color: 'var(--success)' },
         ],
         graphLabel: 'Ganhos Semanais',
@@ -216,67 +315,33 @@ const DashboardPreview = ({ role }: { role: Role }) => {
         <div className="dash-indicator"></div>
         {dashboardData.title + ' #' + dashboardData.id}
       </div>
-
       <div className="dash-header">
         <div>
-          <div style={{ fontSize: '0.8rem', color: '#9ca3af' }}>
-            {dashboardData.mainLabel}
-          </div>
-          <div style={{ fontSize: '1.8rem', fontWeight: '700' }}>
-            {dashboardData.mainValue}
-          </div>
+          <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{dashboardData.mainLabel}</div>
+          <div style={{ fontSize: '1.8rem', fontWeight: '700', color: 'var(--text-main)' }}>{dashboardData.mainValue}</div>
         </div>
-        <button
-          className="btn btn-primary dash-action-btn"
-          style={{ padding: '5px 15px', fontSize: '0.8rem', cursor: 'default' }}
-        >
-          {dashboardData.btnText}
-        </button>
+        <button className="btn btn-primary dash-action-btn" style={{ padding: '5px 15px', fontSize: '0.8rem', cursor: 'default' }}>{dashboardData.btnText}</button>
       </div>
-
       <div className="dash-stats">
         {dashboardData.stats.map((stat, index) => (
           <div key={index} className="stat-box">
-            <div className="stat-val" style={{ color: stat.color }}>
-              {stat.val}
-            </div>
+            <div className="stat-val" style={{ color: stat.color }}>{stat.val}</div>
             <div className="stat-label">{stat.label}</div>
           </div>
         ))}
       </div>
-
       <div className="graph-container">
         <div className="graph-label">{dashboardData.graphLabel}</div>
-        <div
-          style={{
-            height: '150px',
-            display: 'flex',
-            alignItems: 'flex-end',
-            gap: '8px',
-          }}
-        >
+        <div style={{ height: '150px', display: 'flex', alignItems: 'flex-end', gap: '8px' }}>
           {dashboardData.bars.map((bar, i) => (
-            <div
-              key={i}
-              className="bar-interactive"
-              onMouseEnter={() => setHoveredBar(i)}
-              onMouseLeave={() => setHoveredBar(null)}
+            <div key={i} className="bar-interactive" onMouseEnter={() => setHoveredBar(i)} onMouseLeave={() => setHoveredBar(null)}
               style={{
-                width: '100%',
-                height: `${bar.height}%`, 
-                background: dashboardData.graphColor,
-                opacity: 0.4 + (i / dashboardData.bars.length) * 0.6,
-                borderRadius: '4px 4px 0 0',
-                transition: 'all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)',
-                position: 'relative',
-                cursor: 'pointer',
+                width: '100%', height: `${bar.height}%`, background: dashboardData.graphColor,
+                opacity: 0.4 + (i / dashboardData.bars.length) * 0.6, borderRadius: '4px 4px 0 0',
+                transition: 'all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)', position: 'relative', cursor: 'pointer',
               }}
             >
-              {hoveredBar === i && (
-                <div className="chart-tooltip">
-                  {bar.tooltip}
-                </div>
-              )}
+              {hoveredBar === i && <div className="chart-tooltip">{bar.tooltip}</div>}
             </div>
           ))}
         </div>
@@ -285,181 +350,124 @@ const DashboardPreview = ({ role }: { role: Role }) => {
   );
 };
 
-const Hero = ({ activeRole, setActiveRole }: HeroProps) => (
-  <section className="hero">
-    <div className="hero-bg-wrapper">
-      <img
-        src="https://media.istockphoto.com/id/1405608734/vector/glowing-neon-lines-tunnel-led-arcade-stage-abstract-technology-background-virtual-reality.jpg?s=612x612&w=0&k=20&c=6qvHGCesp7DYYkYLUlBI1f_JnWQWsQDutY769MYLPu0="
-        alt="Abstract Neon Background"
-        className="hero-bg-img"
-      />
-      <div className="hero-bg-overlay"></div>
-    </div>
-
-    <div className="container">
-      <div className="hero-tag">Plataforma Beta - Acesso Antecipado</div>
-      <h1 className="hero-title">
-        O Fim da Desorganização <br />
-        <span>No Mundo dos Cortes</span>
-      </h1>
-      <p className="hero-subtitle">
-        Integramos Criadores e Clipadores em um único ecossistema. Sem taxas de
-        adm, sem planilhas manuais e pagamentos automatizados.
-      </p>
-
-      <div className="hero-buttons">
-        <button
-          className={
-            activeRole === 'creator' ? 'btn btn-active-role' : 'btn btn-outline'
-          }
-          onClick={() => setActiveRole('creator')}
-          style={{ fontWeight: 'bold', minWidth: '200px' }}
-        >
-          Sou Criador de Conteúdo
-        </button>
-        <button
-          className={
-            activeRole === 'clipper' ? 'btn btn-active-role' : 'btn btn-outline'
-          }
-          onClick={() => setActiveRole('clipper')}
-          style={{ fontWeight: 'bold', minWidth: '200px' }}
-        >
-          Sou Clipador
-        </button>
-      </div>
-
-      <DashboardPreview role={activeRole} />
-    </div>
-  </section>
-);
-
-const RolesSection = ({ activeRole, setActiveRole }: RolesSectionProps) => {
-  const creatorFeatures = [
-    {
-      Icon: Icons.BarChart3,
-      title: 'ROI em Tempo Real',
-      desc: 'Saiba exatamente quanto cada visualização está custando e o retorno sobre investimento da sua campanha.',
-    },
-    {
-      Icon: Icons.Wallet,
-      title: 'Pagamentos Centralizados',
-      desc: 'Esqueça fazer 50 PIX manuais. Deposite um valor único e nós distribuímos conforme as metas.',
-    },
-    {
-      Icon: Icons.ShieldCheck,
-      title: 'Controle de Qualidade',
-      desc: 'Aprove ou rejeite vídeos antes do pagamento ser liberado. Defina regras claras de monetização.',
-    },
-  ];
-
-  const clipperFeatures = [
-    {
-      Icon: Icons.Trophy,
-      title: 'Rankings Competitivos',
-      desc: 'Visualize sua posição no ranking global e da campanha. Gamificação real para aumentar seus ganhos.',
-    },
-    {
-      Icon: Icons.LineChart,
-      title: 'Previsibilidade',
-      desc: 'Saiba exatamente quanto vai receber e quando. Um dashboard claro com suas metas de views e vídeos.',
-    },
-    {
-      Icon: Icons.CheckCircle,
-      title: 'Pagamento Garantido',
-      desc: 'O dinheiro do criador já está na plataforma. Cumpriu a meta? O saldo é liberado para sua carteira.',
-    },
-  ];
-
-  const currentFeatures =
-    activeRole === 'creator' ? creatorFeatures : clipperFeatures;
+// --- HERO COM IMAGEM DINÂMICA ---
+const Hero = ({ activeRole, setActiveRole, theme }: HeroProps) => {
+  // URLs das imagens
+  const darkBg = "https://media.istockphoto.com/id/1405608734/vector/glowing-neon-lines-tunnel-led-arcade-stage-abstract-technology-background-virtual-reality.jpg?s=612x612&w=0&k=20&c=6qvHGCesp7DYYkYLUlBI1f_JnWQWsQDutY769MYLPu0="; 
+  const lightBgSafe = "https://img.freepik.com/free-vector/blue-geometric-background_1409-961.jpg?semt=ais_hybrid&w=740&q=80";
 
   return (
-    <section id="roles" className="section">
+    <section className="hero">
+      <div className="hero-bg-wrapper">
+        <img
+          src={theme === 'light' ? lightBgSafe : darkBg}
+          alt="Background"
+          className="hero-bg-img"
+          style={{ 
+            opacity: theme === 'light' ? 0.6 : 0.15, // Aumenta opacidade no claro para ver melhor
+            filter: theme === 'light' ? 'none' : 'saturate(0)', // Remove filtro P&B no claro se quiser cor
+            mixBlendMode: theme === 'light' ? 'multiply' : 'screen' // Multiply mescla melhor no branco
+          }} 
+        />
+        <div className="hero-bg-overlay" style={{
+           background: theme === 'light' 
+             ? 'linear-gradient(to bottom, transparent 0%, var(--bg-dark) 100%)' 
+             : 'linear-gradient(to bottom, transparent 0%, var(--bg-dark) 100%)'
+        }}></div>
+      </div>
+
       <div className="container">
-        <div style={{ textAlign: 'center', marginBottom: '40px' }}>
-          <h2 style={{ fontSize: '2.5rem', marginBottom: '20px' }}>
-            Feito para o Ecossistema
-          </h2>
-          <div className="role-switch">
-            <button
-              className={`role-btn ${activeRole === 'creator' ? 'active' : ''}`}
-              onClick={() => setActiveRole('creator')}
-            >
-              Para Criadores
-            </button>
-            <button
-              className={`role-btn ${activeRole === 'clipper' ? 'active' : ''}`}
-              onClick={() => setActiveRole('clipper')}
-            >
-              Para Clipadores
-            </button>
-          </div>
+        <div className="hero-tag">Plataforma Beta - Acesso Antecipado</div>
+        <h1 className="hero-title">
+          O Fim da Desorganização <br />
+          <span>No Mundo dos Cortes</span>
+        </h1>
+        <p className="hero-subtitle">
+          Integramos Criadores e Clipadores em um único ecossistema. Sem taxas de
+          adm, sem planilhas manuais e pagamentos automatizados.
+        </p>
+
+        <div className="hero-buttons">
+          <button
+            className={`btn ${activeRole === 'creator' ? 'btn-active-role' : 'btn-outline'}`}
+            onClick={() => setActiveRole('creator')}
+            style={{ fontWeight: 'bold', minWidth: '200px' }}
+          >
+            Sou Criador de Conteúdo
+          </button>
+          <button
+            className={`btn ${activeRole === 'clipper' ? 'btn-active-role' : 'btn-outline'}`}
+            onClick={() => setActiveRole('clipper')}
+            style={{ fontWeight: 'bold', minWidth: '200px' }}
+          >
+            Sou Clipador
+          </button>
         </div>
 
-        <div className="features-grid">
-          {currentFeatures.map((feature, index) => (
-            <div key={index} className="feature-card">
-              <div className="feature-icon">
-                <feature.Icon size={28} />
-              </div>
-              <h3 className="feature-title">{feature.title}</h3>
-              <p className="feature-desc">{feature.desc}</p>
-            </div>
-          ))}
-        </div>
+        <DashboardPreview role={activeRole} />
       </div>
     </section>
   );
 };
 
+// ... (Mantenha RolesSection, ComparisonSection, Footer iguais)
+const RolesSection = ({ activeRole, setActiveRole }: RolesSectionProps) => {
+    const creatorFeatures = [
+        { Icon: Icons.BarChart3, title: 'ROI em Tempo Real', desc: 'Saiba exatamente quanto cada visualização está custando e o retorno sobre investimento da sua campanha.' },
+        { Icon: Icons.Wallet, title: 'Pagamentos Centralizados', desc: 'Esqueça fazer 50 PIX manuais. Deposite um valor único e nós distribuímos conforme as metas.' },
+        { Icon: Icons.ShieldCheck, title: 'Controle de Qualidade', desc: 'Aprove ou rejeite vídeos antes do pagamento ser liberado. Defina regras claras de monetização.' },
+    ];
+    const clipperFeatures = [
+        { Icon: Icons.Trophy, title: 'Rankings Competitivos', desc: 'Visualize sua posição no ranking global e da campanha. Gamificação real para aumentar seus ganhos.', },
+        { Icon: Icons.LineChart, title: 'Previsibilidade', desc: 'Saiba exatamente quanto vai receber e quando. Um dashboard claro com suas metas de views e vídeos.', },
+        { Icon: Icons.CheckCircle, title: 'Pagamento Garantido', desc: 'O dinheiro do criador já está na plataforma. Cumpriu a meta? O saldo é liberado para sua carteira.', },
+    ];
+    const currentFeatures = activeRole === 'creator' ? creatorFeatures : clipperFeatures;
+
+    return (
+        <section id="roles" className="section">
+        <div className="container">
+            <div style={{ textAlign: 'center', marginBottom: '40px' }}>
+            <h2 style={{ fontSize: '2.5rem', marginBottom: '20px' }}>Feito para o Ecossistema</h2>
+            <div className="role-switch">
+                {/* A classe 'active' agora é controlada pelo CSS corrigido */}
+                <button className={`role-btn ${activeRole === 'creator' ? 'active' : ''}`} onClick={() => setActiveRole('creator')}>Para Criadores</button>
+                <button className={`role-btn ${activeRole === 'clipper' ? 'active' : ''}`} onClick={() => setActiveRole('clipper')}>Para Clipadores</button>
+            </div>
+            </div>
+            <div className="features-grid">
+            {currentFeatures.map((feature, index) => (
+                <div key={index} className="feature-card">
+                <div className="feature-icon"><feature.Icon size={28} /></div>
+                <h3 className="feature-title">{feature.title}</h3>
+                <p className="feature-desc">{feature.desc}</p>
+                </div>
+            ))}
+            </div>
+        </div>
+        </section>
+    );
+};
+
 const comparisonData = [
-  {
-    resource: 'Taxa de Organização',
-    bad: 'Paga ao ADM/Mod',
-    good: 'R$ 0,00 (Isento)',
-  },
-  {
-    resource: 'Pagamentos',
-    bad: 'Manual (Um por um)',
-    good: 'Automático / PIX em lote',
-  },
-  {
-    resource: 'Transparência',
-    bad: 'Planilhas confusas',
-    good: 'Dashboard em Tempo Real',
-  },
-  {
-    resource: 'Segurança',
-    bad: 'Confiança verbal',
-    good: 'Valor retido (Escrow)',
-  },
+  { resource: 'Taxa de Organização', bad: 'Paga ao ADM/Mod', good: 'R$ 0,00 (Isento)' },
+  { resource: 'Pagamentos', bad: 'Manual (Um por um)', good: 'Automático / PIX em lote' },
+  { resource: 'Transparência', bad: 'Planilhas confusas', good: 'Dashboard em Tempo Real' },
+  { resource: 'Segurança', bad: 'Confiança verbal', good: 'Valor retido (Escrow)' },
 ];
 
 const ComparisonSection = () => (
   <section className="section" style={{ background: 'var(--bg-card)' }}>
     <div className="container">
-      <h2
-        style={{
-          textAlign: 'center',
-          fontSize: '2.5rem',
-          marginBottom: '50px',
-        }}
-      >
-        A Evolução do Mercado
-      </h2>
-
+      <h2 style={{ textAlign: 'center', fontSize: '2.5rem', marginBottom: '50px' }}>A Evolução do Mercado</h2>
       <div className="comparison-desktop">
         <div style={{ overflowX: 'auto' }}>
           <table className="comparison-table">
             <thead>
               <tr>
                 <th style={{ width: '30%' }}>Recurso</th>
-                <th style={{ width: '35%' }} className="col-header">
-                  Modelo Atual (Discord)
-                </th>
-                <th style={{ width: '35%' }} className="col-header brand">
-                  Clipay
-                </th>
+                <th style={{ width: '35%' }} className="col-header">Modelo Atual (Discord)</th>
+                <th style={{ width: '35%' }} className="col-header brand">Clipay</th>
               </tr>
             </thead>
             <tbody>
@@ -467,39 +475,24 @@ const ComparisonSection = () => (
                 <tr key={i}>
                   <td>{item.resource}</td>
                   <td style={{ color: 'var(--danger)' }}>{item.bad}</td>
-                  <td style={{ color: 'var(--success)', fontWeight: 'bold' }}>
-                    {item.good}
-                  </td>
+                  <td style={{ color: 'var(--success)', fontWeight: 'bold' }}>{item.good}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       </div>
-
       <div className="comparison-mobile">
         {comparisonData.map((item, i) => (
           <div key={i} className="comp-card">
             <div className="comp-title">{item.resource}</div>
-
             <div className="comp-row">
-              <div className="comp-label" style={{ color: 'var(--danger)' }}>
-                <Icons.XCircle size={18} color="var(--danger)" />
-                Discord
-              </div>
-              <div style={{ textAlign: 'right', color: '#9ca3af' }}>
-                {item.bad}
-              </div>
+              <div className="comp-label" style={{ color: 'var(--danger)' }}><Icons.XCircle size={18} color="var(--danger)" />Discord</div>
+              <div style={{ textAlign: 'right', color: 'var(--text-muted)' }}>{item.bad}</div>
             </div>
-
             <div className="comp-row">
-              <div className="comp-label" style={{ color: 'var(--success)' }}>
-                <Icons.CheckCircle size={18} color="var(--success)" />
-                Clipay
-              </div>
-              <div style={{ textAlign: 'right', fontWeight: 'bold' }}>
-                {item.good}
-              </div>
+              <div className="comp-label" style={{ color: 'var(--success)' }}><Icons.CheckCircle size={18} color="var(--success)" />Clipay</div>
+              <div style={{ textAlign: 'right', fontWeight: 'bold' }}>{item.good}</div>
             </div>
           </div>
         ))}
@@ -513,37 +506,15 @@ const Footer = () => {
   return (
     <footer className="footer">
       <div className="container">
-        <div
-          className="logo"
-          style={{ justifyContent: 'center', marginBottom: '20px' }}
-        >
-          <Icons.Play fill="var(--primary)" size={24} />
-          Clipay
+        <div className="logo" style={{ justifyContent: 'center', marginBottom: '20px' }}>
+          <Icons.Play fill="var(--primary)" size={24} />Clipay
         </div>
-        <div
-          className="nav-links"
-          style={{
-            justifyContent: 'center',
-            gap: '20px',
-            marginBottom: '30px',
-          }}
-        >
-          <a href="#" className="nav-link">
-            Termos de Uso
-          </a>
-          <a href="#" className="nav-link">
-            Política de Privacidade
-          </a>
-          <a href="#" className="nav-link">
-            Suporte
-          </a>
+        <div className="nav-links" style={{ justifyContent: 'center', gap: '20px', marginBottom: '30px' }}>
+          <a href="#" className="nav-link">Termos de Uso</a>
+          <a href="#" className="nav-link">Política de Privacidade</a>
+          <a href="#" className="nav-link">Suporte</a>
         </div>
-        <p className="footer-text">
-          &copy; {date.getFullYear()} Clipay Tecnologia. Todos os direitos
-          reservados.
-          <br />
-          Conectando criadores e impulsionando conteúdos.
-        </p>
+        <p className="footer-text">&copy; {date.getFullYear()} Clipay Tecnologia. Todos os direitos reservados.<br />Conectando criadores e impulsionando conteúdos.</p>
       </div>
     </footer>
   );
@@ -553,20 +524,19 @@ export default function LandingPage() {
   const [activeRole, setActiveRole] = useState<Role>('creator');
   const [user, setUser] = useState<UserState | null>(null);
   const [loading, setLoading] = useState(true);
+  
+  // TEMA PADRÃO: LIGHT
+  const [theme, setTheme] = useState<'dark' | 'light'>('light');
 
-  // Efeito para verificar autenticação
   useEffect(() => {
+    // Verifica auth
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       if (currentUser) {
         try {
           const userDoc = await getDoc(doc(db, "users", currentUser.uid));
           if (userDoc.exists()) {
             const data = userDoc.data();
-            setUser({
-              name: data.name || 'Usuário',
-              role: data.role || 'creator',
-              uid: currentUser.uid
-            });
+            setUser({ name: data.name || 'Usuário', role: data.role || 'creator', uid: currentUser.uid });
           }
         } catch (error) {
           console.error("Erro ao buscar dados do usuário:", error);
@@ -577,76 +547,49 @@ export default function LandingPage() {
       setLoading(false);
     });
 
+    // Verifica tema salvo ou define light como padrão
+    const savedTheme = localStorage.getItem('clipay-theme') as 'dark' | 'light' | null;
+    if (savedTheme) {
+      setTheme(savedTheme);
+      document.documentElement.setAttribute('data-theme', savedTheme);
+    } else {
+      // Garante que o padrão seja light se não houver nada salvo
+      document.documentElement.setAttribute('data-theme', 'light');
+    }
+
     return () => unsubscribe();
   }, []);
 
+  const toggleTheme = () => {
+    const newTheme = theme === 'dark' ? 'light' : 'dark';
+    setTheme(newTheme);
+    document.documentElement.setAttribute('data-theme', newTheme);
+    localStorage.setItem('clipay-theme', newTheme);
+  };
+
   return (
     <div className="app">
-      {/* Passamos o estado do usuário para o Header */}
-      <Header user={user} loading={loading} />
-      <Hero activeRole={activeRole} setActiveRole={setActiveRole} />
+      {/* Passamos theme e toggleTheme para o Header */}
+      <Header user={user} loading={loading} theme={theme} toggleTheme={toggleTheme} />
+      
+      {/* Passamos theme para o Hero para trocar a imagem */}
+      <Hero activeRole={activeRole} setActiveRole={setActiveRole} theme={theme} />
+      
       <RolesSection activeRole={activeRole} setActiveRole={setActiveRole} />
       <ComparisonSection />
-
+      
       <section className="section container" style={{ textAlign: 'center' }}>
-        <div
-          style={{
-            background: 'var(--gradient-main)',
-            padding: '60px',
-            borderRadius: '20px',
-            position: 'relative',
-            overflow: 'hidden',
-          }}
-        >
+        <div style={{ background: 'var(--gradient-main)', padding: '60px', borderRadius: '20px', position: 'relative', overflow: 'hidden' }}>
           <div style={{ position: 'relative', zIndex: 2 }}>
-            <h2
-              style={{
-                fontSize: '2.5rem',
-                marginBottom: '20px',
-                color: 'white',
-              }}
-            >
-              Pronto para escalar?
-            </h2>
-            <p
-              style={{
-                marginBottom: '30px',
-                color: 'rgba(255,255,255,0.9)',
-                fontSize: '1.1rem',
-              }}
-            >
-              Junte-se a centenas de criadores e clipadores que já estão
-              profissionalizando o mercado.
-            </p>
+            <h2 style={{ fontSize: '2.5rem', marginBottom: '20px', color: 'white' }}>Pronto para escalar?</h2>
+            <p style={{ marginBottom: '30px', color: 'rgba(255,255,255,0.9)', fontSize: '1.1rem' }}>Junte-se a centenas de criadores e clipadores que já estão profissionalizando o mercado.</p>
             <Link to="/signup">
-              <button
-                className="btn"
-                style={{
-                  background: 'white',
-                  color: 'var(--primary)',
-                  padding: '15px 40px',
-                  fontSize: '1.1rem',
-                }}
-              >
-                Criar Conta Grátis
-              </button>
+              <button className="btn" style={{ background: 'white', color: 'var(--primary)', padding: '15px 40px', fontSize: '1.1rem' }}>Criar Conta Grátis</button>
             </Link>
           </div>
-          <div
-            style={{
-              position: 'absolute',
-              top: '-50%',
-              right: '-10%',
-              width: '400px',
-              height: '400px',
-              background: 'white',
-              opacity: '0.1',
-              borderRadius: '50%',
-            }}
-          ></div>
+          <div style={{ position: 'absolute', top: '-50%', right: '-10%', width: '400px', height: '400px', background: 'white', opacity: '0.1', borderRadius: '50%' }}></div>
         </div>
       </section>
-
       <Footer />
     </div>
   );
