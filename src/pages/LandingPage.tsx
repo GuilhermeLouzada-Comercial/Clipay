@@ -76,36 +76,6 @@ const Header = ({ user, loading, theme, toggleTheme }: HeaderProps) => {
 
   return (
     <>
-      {/* Estilos forçados para garantir o layout correto sem mexer no CSS externo */}
-      <style>{`
-        /* Padrão Desktop */
-        .nav-buttons { display: flex; align-items: center; gap: 15px; }
-        .mobile-cta-container { display: none; }
-        .mobile-menu-btn { display: none; }
-
-        /* Mobile */
-        @media (max-width: 768px) {
-          .nav-links, 
-          .nav-buttons { 
-            display: none !important; /* Garante que o toggle desktop suma */
-          }
-          .mobile-menu-btn { 
-            display: block !important; 
-            z-index: 20;
-          }
-          .mobile-cta-container {
-            display: block !important;
-            position: absolute;
-            left: 50%;
-            transform: translateX(-50%);
-            white-space: nowrap;
-            z-index: 10;
-          }
-          /* Ajuste fino para o logo não bater no botão centralizado em telas muito pequenas */
-          .logo span { display: none; } 
-        }
-      `}</style>
-
       <header className="header">
         <div className="container nav-container" style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           
