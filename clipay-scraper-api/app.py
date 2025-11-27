@@ -10,6 +10,13 @@ from firebase_admin import credentials, firestore
 app = Flask(__name__)
 CORS(app)
 
+# --- MARCADOR DE VERSÃO (ADICIONE ISSO) ---
+print("--------------------------------------------------")
+print("--- VERSÃO 3.0: AGORA VAI! CARREGADO COM SUCESSO ---")
+print("--------------------------------------------------")
+# --------------------------------------------------------
+
+
 # --- CONFIGURAÇÃO FIREBASE ---
 if os.environ.get('FIREBASE_CREDENTIALS'):
     cred_dict = json.loads(os.environ.get('FIREBASE_CREDENTIALS'))
