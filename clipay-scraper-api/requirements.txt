@@ -1,4 +1,5 @@
 flask
 flask-cors
-yt-dlp
 firebase-admin
+yt-dlp>=2025.11.04
+instaloader
