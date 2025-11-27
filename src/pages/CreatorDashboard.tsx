@@ -24,6 +24,7 @@ interface NewCampaignState {
   cpm: string;
   description: string;
   hashtag: string;
+  mention: string;
 }
 
 interface DashInputProps {
@@ -96,7 +97,8 @@ export default function CreatorDashboard() {
     budget: '',
     cpm: '', 
     description: '',
-    hashtag: ''
+    hashtag: '',
+    mention: ''
   });
 
   useEffect(() => {
@@ -135,29 +137,37 @@ export default function CreatorDashboard() {
       const budgetVal = parseFloat(newCampaign.budget);
       const cpmVal = parseFloat(newCampaign.cpm);
 
-      // 1. Salva a campanha no banco como "Pendente de Pagamento"
+      // Limpeza final de segurança (remove espaços extras)
+      const cleanHashtag = newCampaign.hashtag.replace('#', '').trim();
+      const cleanMention = newCampaign.mention.replace('@', '').trim();
+
+      // 1. Salva a campanha no banco
       const docRef = await addDoc(collection(db, "campaigns"), {
         creatorId: auth.currentUser.uid,
         title: newCampaign.title,
         budget: budgetVal,
         cpm: cpmVal,
         description: newCampaign.description,
-        requiredHashtag: newCampaign.hashtag,
+        
+        // Salvando os campos de validação para o Robô usar depois
+        requiredHashtag: cleanHashtag,
+        requiredMention: cleanMention, 
+        
         status: 'pending_payment', 
         createdAt: serverTimestamp()
       });
 
-      // 2. Gera a mensagem para o WhatsApp com valores formatados
-      const message = `Olá! Acabei de criar a campanha "${newCampaign.title}" na Clipay (ID: ${docRef.id}).\n\nOrçamento: ${formatCurrency(budgetVal)}\nCPM: ${formatCurrency(cpmVal)}\n\nGostaria de realizar o pagamento via PIX para ativar a campanha.`;
+      // 2. Gera a mensagem para o WhatsApp
+      const message = `Olá! Criei a campanha "${newCampaign.title}" (ID: ${docRef.id}).\n\nOrçamento: ${formatCurrency(budgetVal)}\nCPM: ${formatCurrency(cpmVal)}\nHashtag: #${cleanHashtag}\nMenção Obrigatória: @${cleanMention}\n\nAguardo instruções para o PIX.`;
       
       const whatsappUrl = `https://wa.me/553133601286?text=${encodeURIComponent(message)}`;
 
-      // 3. Redireciona para o WhatsApp
+      // 3. Redireciona
       window.open(whatsappUrl, '_blank');
       
-      // 4. Volta para o dashboard e limpa form
+      // 4. Limpa form
       setView('dashboard');
-      setNewCampaign({ title: '', budget: '', cpm: '', description: '', hashtag: '' });
+      setNewCampaign({ title: '', budget: '', cpm: '', description: '', hashtag: '', mention: '' });
       alert("Campanha criada! Finalize o pagamento no WhatsApp para ativar.");
 
     } catch (error) {
@@ -309,13 +319,30 @@ export default function CreatorDashboard() {
                   onChange={(e) => setNewCampaign({...newCampaign, cpm: e.target.value})}
                 />
               </div>
-              <DashInput 
-                label="Hashtag Obrigatória" 
-                placeholder="Ex: ClipayOficial (sem #)" 
-                prefix="#"
-                value={newCampaign.hashtag}
-                onChange={(e) => setNewCampaign({...newCampaign, hashtag: e.target.value})}
-              />
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+                <DashInput 
+                  label="Hashtag Obrigatória" 
+                  placeholder="Ex: ClipayOficial" 
+                  prefix="#"
+                  value={newCampaign.hashtag}
+                  onChange={(e) => {
+                    // Remove # e espaços automaticamente
+                    const val = e.target.value.replace(/#/g, '').replace(/\s/g, '');
+                    setNewCampaign({...newCampaign, hashtag: val});
+                  }}
+                />
+                <DashInput 
+                  label="Conta para Marcar (@)" 
+                  placeholder="Ex: podpah" 
+                  prefix="@"
+                  value={newCampaign.mention}
+                  onChange={(e) => {
+                    // Remove @ e espaços automaticamente
+                    const val = e.target.value.replace(/@/g, '').replace(/\s/g, '');
+                    setNewCampaign({...newCampaign, mention: val});
+                  }}
+                />
+              </div>
               
               <div style={{ marginBottom: '25px' }}>
                 <label style={{ display: 'block', marginBottom: '8px', fontSize: '0.9rem', color: '#9ca3af' }}>Regras e Descrição</label>
