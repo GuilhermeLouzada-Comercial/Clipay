@@ -2,10 +2,22 @@ import React, { useState, useEffect } from 'react';
 import { Icons } from '../components/Icons';
 import { auth, db } from '../services/firebase';
 import { signOut } from 'firebase/auth';
-import { doc, getDoc, updateDoc, collection, addDoc, query, where, getDocs, serverTimestamp, orderBy } from 'firebase/firestore';
+import { 
+  doc, 
+  getDoc, 
+  updateDoc, 
+  collection, 
+  addDoc, 
+  query, 
+  where, 
+  getDocs, 
+  serverTimestamp, 
+  orderBy, 
+  arrayUnion 
+} from 'firebase/firestore';
 import { useNavigate } from 'react-router-dom';
 
-// --- SISTEMA DE GAMIFICAÇÃO (Mantido) ---
+// --- SISTEMA DE GAMIFICAÇÃO ---
 const RANKS = [
   { name: 'Bronze', min: 0, max: 1000, color: '#cd7f32' },
   { name: 'Prata', min: 1001, max: 3000, color: '#94a3b8' },
@@ -25,17 +37,21 @@ interface UserData {
   name: string;
   pixKey: string;
   email: string;
-  xp: number; 
+  xp: number;
+  joinedCampaigns?: string[];
 }
 
 interface Campaign {
   id: string;
   title: string;
-  creator: string;
-  rewardPool: string;
-  status: 'active' | 'full';
-  tags: string[];
-  requiredHashtag?: string; // Adicionado para validação
+  creatorId: string;
+  budget: number;
+  cpm: number;
+  description: string;
+  requiredHashtag: string;
+  requiredMention: string;
+  status: 'active' | 'full' | 'finished' | 'pending_payment';
+  createdAt?: any;
 }
 
 interface SubmittedVideo {
@@ -49,21 +65,16 @@ interface SubmittedVideo {
     lastUpdated: any;
 }
 
-type ProgressType = 100 | { current: number; total: number };
-
-// Adicionado 'my-videos' nas views
 type ViewType = 'overview' | 'campaigns' | 'my-videos' | 'experience' | 'rankings' | 'settings';
 
-interface StatCardProps {
-  label: string;
-  value: string;
-  icon: React.ElementType;
-  color: string;
-}
+// --- FUNÇÕES AUXILIARES ---
 
-// --- FUNÇÕES DE API (SIMULAÇÃO/INTEGRAÇÃO) ---
+const formatCurrency = (value: number) => {
+  // Tratamento para evitar NaN na tela
+  if (isNaN(value)) return "R$ 0,00";
+  return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
+};
 
-// Função auxiliar para detectar plataforma
 const detectPlatform = (url: string): 'youtube' | 'tiktok' | 'instagram' | 'unknown' => {
     if (url.includes('youtube.com/shorts') || url.includes('youtu.be')) return 'youtube';
     if (url.includes('tiktok.com')) return 'tiktok';
@@ -71,13 +82,7 @@ const detectPlatform = (url: string): 'youtube' | 'tiktok' | 'instagram' | 'unkn
     return 'unknown';
 };
 
-// Esta função simula a busca de dados. 
-// Para produção, você substituiria os `setTimeout` por `fetch('https://api.rapidapi.com/...')`
 const fetchVideoStats = async (url: string, platform: string) => {
-    console.log(`Buscando dados para ${platform}: ${url}`);
-    
-    // SIMULAÇÃO: Retorna um número aleatório de views para demonstração
-    // Substitua isso pela chamada real à API (ex: YouTube Data API ou RapidAPI para TikTok)
     return new Promise<{ views: number }>((resolve) => {
         setTimeout(() => {
             const randomViews = Math.floor(Math.random() * 5000) + 100;
@@ -86,9 +91,7 @@ const fetchVideoStats = async (url: string, platform: string) => {
     });
 };
 
-// --- COMPONENTES AUXILIARES ---
-
-const StatCard: React.FC<StatCardProps> = ({ label, value, icon: Icon, color }) => (
+const StatCard = ({ label, value, icon: Icon, color }: any) => (
   <div style={{ 
     background: 'var(--bg-card)', 
     padding: '20px', 
@@ -131,27 +134,18 @@ const CircularProgress = ({ value, max, color, size = 200, strokeWidth = 15 }: {
 
 export default function ClipperDashboard() {
   const navigate = useNavigate();
-  
   const [view, setView] = useState<ViewType>('overview');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [userData, setUserData] = useState<UserData>({ name: '', pixKey: '', email: '', xp: 0 });
+  const [userData, setUserData] = useState<UserData>({ name: '', pixKey: '', email: '', xp: 0, joinedCampaigns: [] });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [theme, setTheme] = useState<'dark' | 'light'>('light');
 
-  // Estados para Meus Vídeos
+  const [availableCampaigns, setAvailableCampaigns] = useState<Campaign[]>([]);
+  const [myVideos, setMyVideos] = useState<SubmittedVideo[]>([]);
   const [videoUrl, setVideoUrl] = useState('');
   const [selectedCampaignId, setSelectedCampaignId] = useState('');
-  const [myVideos, setMyVideos] = useState<SubmittedVideo[]>([]);
   const [submittingVideo, setSubmittingVideo] = useState(false);
-  const [refreshingVideoId, setRefreshingVideoId] = useState<string | null>(null);
-
-  // Simulando busca de campanhas (Idealmente viria do Firestore)
-  const campaigns: Campaign[] = [
-    { id: '1', title: 'Copa do Podpah', creator: 'Podpah', rewardPool: 'R$ 5.000', status: 'active', tags: ['Podcast'], requiredHashtag: 'CopaPodpah' },
-    { id: '2', title: 'Lançamento Curso Tech', creator: 'DevMaster', rewardPool: 'R$ 2.000', status: 'active', tags: ['Tech'], requiredHashtag: 'DevMaster' },
-    { id: '3', title: 'Maratona Fitness', creator: 'IronBerg', rewardPool: 'R$ 10.000', status: 'full', tags: ['Fitness'], requiredHashtag: 'IronBerg' },
-  ];
 
   const getCurrentRank = () => {
     const xp = userData.xp || 0;
@@ -159,38 +153,49 @@ export default function ClipperDashboard() {
   };
   const currentRank = getCurrentRank();
   const nextRank = RANKS[RANKS.findIndex(r => r.name === currentRank.name) + 1] || null;
-
-  const getProgressToNextRank = (): ProgressType => {
-    if (!nextRank) return 100;
-    return { current: (userData.xp || 0) - currentRank.min, total: nextRank.min - currentRank.min };
-  };
-  const progress = getProgressToNextRank();
+  const progress = nextRank ? { current: (userData.xp || 0) - currentRank.min, total: nextRank.min - currentRank.min } : 100;
 
   useEffect(() => {
-    const fetchUserDataAndVideos = async () => {
-      if (auth.currentUser) {
-        // Buscar User
-        const docRef = doc(db, "users", auth.currentUser.uid);
-        const docSnap = await getDoc(docRef);
-        if (docSnap.exists()) {
-          setUserData({ ...docSnap.data(), xp: docSnap.data().xp || 0 } as UserData);
+    const fetchAllData = async () => {
+      if (!auth.currentUser) return;
+      try {
+        const userDoc = await getDoc(doc(db, "users", auth.currentUser.uid));
+        if (userDoc.exists()) {
+          const data = userDoc.data();
+          setUserData({ ...data, xp: data.xp || 0, joinedCampaigns: data.joinedCampaigns || [] } as UserData);
         }
 
-        // Buscar Vídeos do Usuário
-        const q = query(
-            collection(db, "videos"), 
-            where("userId", "==", auth.currentUser.uid),
-            orderBy("lastUpdated", "desc")
-        );
-        const videoSnaps = await getDocs(q);
-        const videosList = videoSnaps.docs.map(d => ({ id: d.id, ...d.data() } as SubmittedVideo));
-        setMyVideos(videosList);
+        const q = query(collection(db, "campaigns"), where("status", "==", "active"));
+        const querySnapshot = await getDocs(q);
+        const fetchedCampaigns: Campaign[] = [];
+        querySnapshot.forEach((doc) => {
+          const data = doc.data();
+          fetchedCampaigns.push({
+            id: doc.id,
+            title: data.title,
+            creatorId: data.creatorId,
+            budget: Number(data.budget),
+            cpm: Number(data.cpm),
+            description: data.description || "",
+            requiredHashtag: data.requiredHashtag || "",
+            requiredMention: data.requiredMention || "",
+            status: data.status,
+            createdAt: data.createdAt
+          });
+        });
+        setAvailableCampaigns(fetchedCampaigns);
 
+        const videosQuery = query(collection(db, "videos"), where("userId", "==", auth.currentUser.uid), orderBy("lastUpdated", "desc"));
+        const videosSnap = await getDocs(videosQuery);
+        const videosList = videosSnap.docs.map(d => ({ id: d.id, ...d.data() } as SubmittedVideo));
+        setMyVideos(videosList);
+      } catch (error) {
+        console.error(error);
+      } finally {
         setLoading(false);
       }
     };
-    fetchUserDataAndVideos();
-
+    fetchAllData();
     const savedTheme = localStorage.getItem('clipay-theme') as 'dark' | 'light' | null;
     if (savedTheme) { setTheme(savedTheme); document.documentElement.setAttribute('data-theme', savedTheme); }
     else { document.documentElement.setAttribute('data-theme', 'light'); }
@@ -205,120 +210,91 @@ export default function ClipperDashboard() {
 
   const handleLogout = async () => { await signOut(auth); navigate('/login'); };
 
-  const handleSaveSettings = async (e: React.FormEvent) => {
-    e.preventDefault(); setSaving(true);
-    if (!auth.currentUser) return;
+  const handleJoinCampaign = async (campaignId: string) => {
+    if(!auth.currentUser) return;
+    if(!window.confirm("Deseja entrar nessa campanha?")) return;
     try {
-      await updateDoc(doc(db, "users", auth.currentUser.uid), { name: userData.name, pixKey: userData.pixKey });
-      alert("Dados atualizados!");
-    } catch (error) { console.error(error); alert("Erro ao salvar."); } finally { setSaving(false); }
+      const userRef = doc(db, "users", auth.currentUser.uid);
+      await updateDoc(userRef, { joinedCampaigns: arrayUnion(campaignId), xp: (userData.xp || 0) + 50 });
+      setUserData(prev => ({ ...prev, joinedCampaigns: [...(prev.joinedCampaigns || []), campaignId], xp: prev.xp + 50 }));
+      alert("Você entrou na campanha com sucesso!");
+      setSelectedCampaignId(campaignId);
+      setView('my-videos');
+    } catch (error) { console.error(error); alert("Erro ao entrar na campanha."); }
   };
 
-  // --- LÓGICA DE SUBMISSÃO DE VÍDEO ---
   const handleSubmitVideo = async (e: React.FormEvent) => {
       e.preventDefault();
       if (!auth.currentUser) return;
-
       const platform = detectPlatform(videoUrl);
-      if (platform === 'unknown') {
-          alert("Link inválido. Aceitamos apenas YouTube Shorts, TikTok ou Instagram Reels.");
-          return;
-      }
-
-      if (!selectedCampaignId) {
-          alert("Selecione uma campanha.");
-          return;
-      }
-
+      if (platform === 'unknown') { alert("Link inválido."); return; }
+      if (!selectedCampaignId) { alert("Selecione uma campanha."); return; }
       setSubmittingVideo(true);
-
       try {
-          const campaign = campaigns.find(c => c.id === selectedCampaignId);
-          
-          // 1. Busca estatísticas iniciais (simulado)
+          const campaign = availableCampaigns.find(c => c.id === selectedCampaignId);
+          if (!campaign) throw new Error("Campanha não encontrada");
           const stats = await fetchVideoStats(videoUrl, platform);
-
-          // 2. Salva no Firestore
           const newVideo = {
-            userId: auth.currentUser.uid,
-            url: videoUrl,
-            platform,
-            views: stats.views,
-            campaignId: selectedCampaignId,
-            campaignTitle: campaign?.title || 'Campanha',
-            
-            requiredHashtag: campaign?.requiredHashtag || '', 
-            requiredMention: campaign?.creator || '',
-        
-            status: 'pending', // Começa pendente até o robô validar
-            validationErrors: [], // Para mostrar o motivo se for rejeitado
-            lastUpdated: serverTimestamp(),
-            createdAt: serverTimestamp()
+            userId: auth.currentUser.uid, url: videoUrl, platform, views: stats.views,
+            campaignId: selectedCampaignId, campaignTitle: campaign.title,
+            requiredHashtag: campaign.requiredHashtag, requiredMention: campaign.requiredMention,
+            status: 'pending' as const, lastUpdated: serverTimestamp(), createdAt: serverTimestamp()
           };
-        
-
           const docRef = await addDoc(collection(db, "videos"), newVideo);
-          
-          // 3. Atualiza estado local e XP (opcional)
           setMyVideos(prev => [{ id: docRef.id, ...newVideo, lastUpdated: new Date() } as SubmittedVideo, ...prev]);
-          
-          // 4. Dá XP pela ação (Ex: +100xp) - Isso deveria ser no backend, mas faremos no front para o MVP
           const userRef = doc(db, "users", auth.currentUser.uid);
           await updateDoc(userRef, { xp: (userData.xp || 0) + 100 });
           setUserData(prev => ({ ...prev, xp: prev.xp + 100 }));
-
-          setVideoUrl('');
-          setSelectedCampaignId('');
-          alert(`Vídeo enviado com sucesso! Views iniciais: ${stats.views}`);
-
-      } catch (error) {
-          console.error("Erro ao enviar vídeo:", error);
-          alert("Erro ao enviar vídeo.");
-      } finally {
-          setSubmittingVideo(false);
-      }
+          setVideoUrl(''); setSelectedCampaignId(''); alert(`Vídeo enviado!`);
+      } catch (error) { console.error(error); alert("Erro ao enviar vídeo."); } finally { setSubmittingVideo(false); }
   };
 
-  // --- LÓGICA DE ATUALIZAR VIEWS ---
-  const handleRefreshStats = async (video: SubmittedVideo) => {
-      setRefreshingVideoId(video.id);
-      try {
-          // Busca dados novos
-          const stats = await fetchVideoStats(video.url, video.platform);
-          
-          // Atualiza Firestore
-          const videoRef = doc(db, "videos", video.id);
-          await updateDoc(videoRef, {
-              views: stats.views,
-              lastUpdated: serverTimestamp()
-          });
-
-          // Atualiza Lista Local
-          setMyVideos(prev => prev.map(v => v.id === video.id ? { ...v, views: stats.views } : v));
-          
-      } catch (error) {
-          console.error("Erro ao atualizar:", error);
-      } finally {
-          setRefreshingVideoId(null);
-      }
+  const handleSaveSettings = async (e: React.FormEvent) => {
+    e.preventDefault(); setSaving(true);
+    if (!auth.currentUser) return;
+    try { await updateDoc(doc(db, "users", auth.currentUser.uid), { name: userData.name, pixKey: userData.pixKey }); alert("Salvo!"); } 
+    catch (error) { console.error(error); alert("Erro."); } finally { setSaving(false); }
   };
 
   const changeView = (newView: ViewType) => { setView(newView); setIsMobileMenuOpen(false); };
+  const getSelectedCampaignDetails = () => availableCampaigns.find(c => c.id === selectedCampaignId);
+
+  if (loading) return <div style={{height: '100vh', display: 'flex', justifyContent: 'center', alignItems: 'center', background: 'var(--bg-dark)', color: 'var(--text-main)'}}>Carregando...</div>;
 
   return (
     <div className="dashboard-layout">
+      {/* 
+        CORREÇÃO DO CSS: 
+        1. .campaign-card: flex-direction column garante que itens fiquem um embaixo do outro.
+        2. .btn-primary dentro do card: removemos altura 100% que causava o bug do botão gigante.
+      */}
       <style>{`
         [data-theme="light"] .sidebar-btn:hover { color: var(--primary) !important; background: var(--bg-card-hover); }
         .dash-input-wrapper { display: flex; alignItems: center; background: var(--bg-card-hover); border: 1px solid var(--border); borderRadius: 8px; padding: 0 12px; transition: var(--transition); }
         .dash-input-wrapper:focus-within { border-color: var(--primary); boxShadow: 0 0 0 2px rgba(59, 130, 246, 0.2); }
         .dash-input { background: transparent; border: none; color: var(--text-main); width: 100%; padding: 12px 0; outline: none; }
-        .campaign-card { background: var(--bg-card); border: 1px solid var(--border); borderRadius: 12px; padding: 20px; transition: all 0.3s ease; }
+        
+        /* CSS DO CARD CORRIGIDO */
+        .campaign-card { 
+          background: var(--bg-card); 
+          border: 1px solid var(--border); 
+          border-radius: 12px; 
+          padding: 25px; 
+          transition: all 0.3s ease; 
+          display: flex; 
+          flex-direction: column; /* Garante alinhamento vertical */
+          justify-content: space-between; 
+          height: 100%;
+          min-height: 280px; /* Altura mínima para ficar uniforme */
+        }
         .campaign-card:hover { transform: translateY(-5px); border-color: var(--primary); box-shadow: var(--shadow-card); }
+        
         .video-platform-icon { display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 50%; color: white; }
         .youtube-bg { background: #FF0000; }
         .tiktok-bg { background: #000000; }
         .instagram-bg { background: linear-gradient(45deg, #f09433 0%, #e6683c 25%, #dc2743 50%, #cc2366 75%, #bc1888 100%); }
-        @media (max-width: 768px) { .desktop-theme-toggle { display: none !important; } }
+        .requirement-box { background: rgba(251, 191, 36, 0.1); border: 1px solid rgba(251, 191, 36, 0.3); color: #d97706; padding: 15px; border-radius: 8px; margin-top: 15px; font-size: 0.9rem; }
+        [data-theme="dark"] .requirement-box { color: #fbbf24; }
       `}</style>
 
       {/* HEADER MOBILE */}
@@ -326,36 +302,29 @@ export default function ClipperDashboard() {
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontWeight: 'bold', color: 'var(--primary)' }}>
           <Icons.Play fill="var(--primary)" size={24} /> Clipay
         </div>
-        <div style={{ display: 'flex', gap: '15px', alignItems: 'center' }}>
-          <button onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)} style={{ background: 'none', border: 'none', color: 'var(--text-main)' }}>
+        <button onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)} style={{ background: 'none', border: 'none', color: 'var(--text-main)' }}>
             {isMobileMenuOpen ? <Icons.X size={28} /> : <Icons.Menu size={28} />}
-          </button>
-        </div>
+        </button>
       </div>
 
       {isMobileMenuOpen && <div className="overlay" onClick={() => setIsMobileMenuOpen(false)}></div>}
 
-      {/* SIDEBAR */}
       <aside className={`sidebar ${isMobileMenuOpen ? 'open' : ''}`}>
         <div style={{ padding: '25px 20px', display: 'flex', alignItems: 'center', gap: '10px', fontSize: '1.2rem', fontWeight: 'bold', color: 'var(--primary)' }}>
           <Icons.Play fill="var(--primary)" size={28} /> Clipper
         </div>
-
         <nav className="sidebar-nav">
           <button onClick={() => changeView('overview')} className={`sidebar-btn ${view === 'overview' ? 'active' : ''}`}><Icons.BarChart3 size={20} /> Visão Geral</button>
           <button onClick={() => changeView('campaigns')} className={`sidebar-btn ${view === 'campaigns' ? 'active' : ''}`}><Icons.Briefcase size={20} /> Campanhas</button>
           <button onClick={() => changeView('my-videos')} className={`sidebar-btn ${view === 'my-videos' ? 'active' : ''}`}><Icons.Play size={20} /> Meus Vídeos</button>
           <button onClick={() => changeView('experience')} className={`sidebar-btn ${view === 'experience' ? 'active' : ''}`}><Icons.Target size={20} /> Nível & XP</button>
-          <button onClick={() => changeView('rankings')} className={`sidebar-btn ${view === 'rankings' ? 'active' : ''}`}><Icons.Trophy size={20} /> Rankings</button>
           <button onClick={() => changeView('settings')} className={`sidebar-btn ${view === 'settings' ? 'active' : ''}`}><Icons.User size={20} /> Configurações</button>
         </nav>
-
         <div className="sidebar-footer">
           <button onClick={handleLogout} className="sidebar-btn" style={{ color: 'var(--danger)' }}><Icons.LogOut size={20} /> Sair</button>
         </div>
       </aside>
 
-      {/* MAIN CONTENT */}
       <main className="main-content">
         <div className="desktop-theme-toggle" onClick={toggleTheme} style={{ position: 'absolute', top: '30px', right: '40px', width: '74px', height: '36px', padding: '4px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '30px', boxShadow: 'var(--shadow-card)', zIndex: 10 }}>
             <div className="theme-toggle-bg" style={{ position: 'absolute', left: '4px', width: '28px', height: '28px', borderRadius: '50%', background: 'var(--primary)', transition: 'transform 0.3s ease', transform: theme === 'dark' ? 'translateX(38px)' : 'translateX(0)' }}></div>
@@ -363,7 +332,6 @@ export default function ClipperDashboard() {
             <div style={{ zIndex: 2, width: '28px', display: 'flex', justifyContent: 'center' }}><Icons.Moon size={18} color={theme === 'dark' ? 'white' : 'var(--text-muted)'} /></div>
         </div>
 
-        {/* --- VISÃO GERAL --- */}
         {view === 'overview' && (
           <div className="fade-in-up">
             <div style={{ display: 'flex', alignItems: 'center', gap: '15px', marginBottom: '30px' }}>
@@ -375,171 +343,152 @@ export default function ClipperDashboard() {
                     <Icons.Star size={16} color={currentRank.color} /> {currentRank.name}
                 </div>
             </div>
-
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '20px', marginBottom: '40px' }}>
               <StatCard label="Saldo Disponível" value="R$ 0,00" icon={Icons.Wallet} color="var(--success)" />
               <StatCard label="XP Atual" value={userData.xp.toString()} icon={Icons.Target} color={currentRank.color} />
-              <StatCard label="Vídeos Postados" value={myVideos.length.toString()} icon={Icons.Play} color="var(--warning)" />
+              <StatCard label="Campanhas Participando" value={(userData.joinedCampaigns?.length || 0).toString()} icon={Icons.Briefcase} color="var(--primary)" />
             </div>
-
-            <div style={{background: 'var(--bg-card)', padding: '30px', borderRadius: '12px', border: '1px solid var(--border)'}}>
-                <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px'}}>
-                    <h2 style={{fontSize: '1.2rem'}}>Últimos Vídeos Enviados</h2>
-                    <button onClick={() => changeView('my-videos')} style={{color: 'var(--primary)', background: 'none', border: 'none', cursor: 'pointer'}}>Ver todos</button>
-                </div>
-                {myVideos.length === 0 ? (
-                    <p style={{color: 'var(--text-muted)', textAlign: 'center'}}>Nenhum vídeo enviado ainda.</p>
-                ) : (
-                    <div style={{display: 'flex', flexDirection: 'column', gap: '10px'}}>
-                        {myVideos.slice(0, 3).map(video => (
-                            <div key={video.id} style={{display: 'flex', justifyContent: 'space-between', padding: '15px', background: 'var(--bg-card-hover)', borderRadius: '8px', alignItems: 'center'}}>
-                                <div style={{display: 'flex', gap: '15px', alignItems: 'center'}}>
-                                    <div className={`video-platform-icon ${video.platform === 'youtube' ? 'youtube-bg' : video.platform === 'tiktok' ? 'tiktok-bg' : 'instagram-bg'}`}>
-                                        <Icons.Play size={14} />
-                                    </div>
-                                    <div>
-                                        <div style={{fontWeight: '500', fontSize: '0.95rem'}}>{video.campaignTitle}</div>
-                                        <div style={{fontSize: '0.8rem', color: 'var(--text-muted)'}}>{video.platform.charAt(0).toUpperCase() + video.platform.slice(1)} • {new Date().toLocaleDateString()}</div>
-                                    </div>
-                                </div>
-                                <div style={{fontWeight: 'bold', color: 'var(--success)'}}>{video.views.toLocaleString()} Views</div>
-                            </div>
-                        ))}
-                    </div>
-                )}
-            </div>
+             {availableCampaigns.length > 0 && userData.joinedCampaigns?.length === 0 && (
+               <div style={{background: 'var(--bg-card)', padding: '30px', borderRadius: '12px', border: '1px solid var(--primary)', textAlign: 'center', marginBottom: '30px'}}>
+                  <h3 style={{marginBottom: '10px'}}>Comece sua jornada!</h3>
+                  <p style={{color: 'var(--text-muted)', marginBottom: '20px'}}>Você ainda não entrou em nenhuma campanha.</p>
+                  <button className="btn btn-primary" onClick={() => changeView('campaigns')}>Ver Campanhas Disponíveis</button>
+               </div>
+            )}
           </div>
         )}
 
-        {/* --- CAMPANHAS --- */}
         {view === 'campaigns' && (
           <div className="fade-in-up">
-            <h1 style={{ fontSize: '1.8rem', marginBottom: '10px' }}>Campanhas Ativas</h1>
-            <p style={{ color: 'var(--text-muted)', marginBottom: '30px' }}>Escolha uma campanha e comece a clipar.</p>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '20px' }}>
-                {campaigns.map(camp => (
-                    <div key={camp.id} className="campaign-card">
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '15px' }}>
-                            <div style={{ fontWeight: 'bold', fontSize: '1.1rem' }}>{camp.title}</div>
-                            {camp.status === 'active' ? (
-                                <span style={{ fontSize: '0.8rem', color: 'var(--success)', background: 'rgba(16, 185, 129, 0.1)', padding: '4px 8px', borderRadius: '4px' }}>Aberta</span>
-                            ) : (
-                                <span style={{ fontSize: '0.8rem', color: 'var(--danger)', background: 'rgba(239, 68, 68, 0.1)', padding: '4px 8px', borderRadius: '4px' }}>Lotada</span>
-                            )}
-                        </div>
-                        <div style={{ marginBottom: '15px', fontSize: '0.9rem', color: 'var(--text-muted)' }}>Criador: <span style={{ color: 'var(--text-main)' }}>{camp.creator}</span></div>
-                        <div style={{ marginBottom: '20px' }}><div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Premiação Total</div><div style={{ fontSize: '1.4rem', fontWeight: 'bold', color: 'var(--success)' }}>{camp.rewardPool}</div></div>
-                        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '20px' }}>{camp.tags.map(tag => (<span key={tag} style={{ fontSize: '0.75rem', background: 'var(--bg-card-hover)', border: '1px solid var(--border)', padding: '4px 8px', borderRadius: '12px' }}>{tag}</span>))}</div>
-                        <button className="btn btn-primary" style={{ width: '100%', opacity: camp.status === 'full' ? 0.5 : 1 }} disabled={camp.status === 'full'} onClick={() => { setSelectedCampaignId(camp.id); changeView('my-videos'); }}>Participar</button>
-                    </div>
-                ))}
-            </div>
+            <h1 style={{ fontSize: '1.8rem', marginBottom: '10px' }}>Campanhas Disponíveis</h1>
+            <p style={{ color: 'var(--text-muted)', marginBottom: '30px' }}>Escolha um desafio e clique em Entrar.</p>
+            
+            {availableCampaigns.length === 0 ? (
+                <div style={{textAlign: 'center', padding: '40px', color: 'var(--text-muted)'}}>
+                    <Icons.Briefcase size={40} style={{marginBottom: '10px', opacity: 0.5}} />
+                    <p>Nenhuma campanha ativa no momento.</p>
+                </div>
+            ) : (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '20px' }}>
+                    {availableCampaigns.map(camp => {
+                        const isJoined = userData.joinedCampaigns?.includes(camp.id);
+                        return (
+                            <div key={camp.id} className="campaign-card">
+                                {/* Parte Superior do Card */}
+                                <div>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '15px' }}>
+                                        <div style={{ fontWeight: 'bold', fontSize: '1.1rem', lineHeight: '1.3' }}>{camp.title}</div>
+                                        <span style={{ fontSize: '0.75rem', color: 'var(--success)', background: 'rgba(16, 185, 129, 0.1)', padding: '4px 8px', borderRadius: '4px', whiteSpace: 'nowrap' }}>Aberta</span>
+                                    </div>
+                                    <div style={{ marginBottom: '15px', fontSize: '0.9rem', color: 'var(--text-muted)', display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                                        {camp.description}
+                                    </div>
+                                    <div style={{ marginBottom: '20px' }}>
+                                        <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Orçamento Total / CPM</div>
+                                        <div style={{ display: 'flex', gap: '8px', alignItems: 'baseline', flexWrap: 'wrap' }}>
+                                            <div style={{ fontSize: '1.2rem', fontWeight: 'bold', color: 'var(--success)' }}>{formatCurrency(camp.budget)}</div>
+                                            <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>({formatCurrency(camp.cpm)}/1k views)</div>
+                                        </div>
+                                    </div>
+                                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '25px' }}>
+                                        {camp.requiredHashtag && <span style={{ fontSize: '0.75rem', background: 'var(--bg-card-hover)', border: '1px solid var(--border)', padding: '4px 8px', borderRadius: '12px', color: 'var(--primary)' }}>#{camp.requiredHashtag}</span>}
+                                        {camp.requiredMention && <span style={{ fontSize: '0.75rem', background: 'var(--bg-card-hover)', border: '1px solid var(--border)', padding: '4px 8px', borderRadius: '12px' }}>@{camp.requiredMention}</span>}
+                                    </div>
+                                </div>
+                                
+                                {/* Botão fixado no rodapé do card */}
+                                <div style={{ marginTop: 'auto' }}>
+                                  {isJoined ? (
+                                      <button 
+                                          className="btn btn-outline" 
+                                          style={{ width: '100%', borderColor: 'var(--success)', color: 'var(--success)', cursor: 'default' }} 
+                                          onClick={() => { setSelectedCampaignId(camp.id); changeView('my-videos'); }}
+                                      >
+                                          <Icons.CheckCircle size={16} style={{marginRight: '5px'}}/> Você participa
+                                      </button>
+                                  ) : (
+                                      <button 
+                                          className="btn btn-primary" 
+                                          style={{ width: '100%' }} 
+                                          onClick={() => handleJoinCampaign(camp.id)}
+                                      >
+                                          Entrar na Campanha
+                                      </button>
+                                  )}
+                                </div>
+                            </div>
+                        );
+                    })}
+                </div>
+            )}
           </div>
         )}
 
-        {/* --- MEUS VÍDEOS (NOVA ABA) --- */}
         {view === 'my-videos' && (
           <div className="fade-in-up">
             <h1 style={{ fontSize: '1.8rem', marginBottom: '10px' }}>Postar e Rastrear</h1>
-            <p style={{ color: 'var(--text-muted)', marginBottom: '30px' }}>Envie o link do seu corte publicado (TikTok, Shorts ou Reels) para contabilizar views.</p>
-
-            {/* FORMULÁRIO DE ENVIO */}
+            <p style={{ color: 'var(--text-muted)', marginBottom: '30px' }}>Envie o link do seu corte publicado.</p>
             <div style={{ background: 'var(--bg-card)', padding: '30px', borderRadius: '16px', border: '1px solid var(--border)', marginBottom: '40px' }}>
                 <form onSubmit={handleSubmitVideo}>
-                    <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '20px', alignItems: 'end' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '20px' }}>
                         <div>
-                            <label style={{ display: 'block', marginBottom: '8px', fontSize: '0.9rem', color: 'var(--text-muted)' }}>Link do Vídeo</label>
-                            <div className="dash-input-wrapper">
-                                <input 
-                                    type="text" 
-                                    className="dash-input" 
-                                    placeholder="https://www.tiktok.com/@usuario/video/..." 
-                                    value={videoUrl}
-                                    onChange={(e) => setVideoUrl(e.target.value)}
-                                    required
-                                />
-                            </div>
-                        </div>
-                        <div>
-                            <label style={{ display: 'block', marginBottom: '8px', fontSize: '0.9rem', color: 'var(--text-muted)' }}>Campanha</label>
+                            <label style={{ display: 'block', marginBottom: '8px', fontSize: '0.9rem', color: 'var(--text-muted)' }}>Selecione a Campanha que você participa</label>
                             <div className="dash-input-wrapper">
                                 <select 
                                     className="dash-input" 
-                                    style={{ cursor: 'pointer' }}
+                                    style={{ cursor: 'pointer', color: selectedCampaignId ? 'var(--text-main)' : 'var(--text-muted)' }}
                                     value={selectedCampaignId}
                                     onChange={(e) => setSelectedCampaignId(e.target.value)}
                                     required
                                 >
                                     <option value="" disabled>Selecione...</option>
-                                    {campaigns.filter(c => c.status === 'active').map(c => (
-                                        <option key={c.id} value={c.id}>{c.title}</option>
+                                    {availableCampaigns.filter(c => userData.joinedCampaigns?.includes(c.id)).map(c => (
+                                        <option key={c.id} value={c.id} style={{color: 'black'}}>{c.title}</option>
                                     ))}
                                 </select>
                             </div>
                         </div>
+                        {selectedCampaignId && (() => {
+                            const details = getSelectedCampaignDetails();
+                            if(details) {
+                                return (
+                                    <div className="requirement-box">
+                                        <div style={{fontWeight: 'bold', marginBottom: '5px', display: 'flex', alignItems: 'center', gap: '5px'}}>
+                                            <Icons.AlertCircle size={18} /> Atenção às Regras Obrigatórias:
+                                        </div>
+                                        <ul style={{listStyle: 'inside', marginLeft: '5px'}}>
+                                            <li>Use a hashtag: <span style={{fontWeight: 'bold', textDecoration: 'underline'}}>#{details.requiredHashtag}</span></li>
+                                            <li>Marque o perfil: <span style={{fontWeight: 'bold', textDecoration: 'underline'}}>@{details.requiredMention}</span></li>
+                                        </ul>
+                                    </div>
+                                )
+                            }
+                        })()}
+                        <div>
+                            <label style={{ display: 'block', marginBottom: '8px', fontSize: '0.9rem', color: 'var(--text-muted)' }}>Link do Vídeo</label>
+                            <div className="dash-input-wrapper">
+                                <input type="text" className="dash-input" placeholder="Cole o link aqui..." value={videoUrl} onChange={(e) => setVideoUrl(e.target.value)} required />
+                            </div>
+                        </div>
                     </div>
-                    <button 
-                        type="submit" 
-                        className="btn btn-primary" 
-                        style={{ marginTop: '20px', width: '100%', display: 'flex', justifyContent: 'center', gap: '10px' }}
-                        disabled={submittingVideo}
-                    >
-                        {submittingVideo ? 'Verificando Link...' : <><Icons.Play size={20} /> Rastrear Vídeo</>}
+                    <button type="submit" className="btn btn-primary" style={{ marginTop: '20px', width: '100%', display: 'flex', justifyContent: 'center', gap: '10px' }} disabled={submittingVideo || !selectedCampaignId}>
+                        {submittingVideo ? 'Validando...' : <><Icons.Play size={20} /> Registrar Vídeo</>}
                     </button>
-                    <p style={{fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '10px', textAlign: 'center'}}>
-                        Ao enviar, nosso sistema verifica as views automaticamente a cada 24h. Você também pode atualizar manualmente abaixo.
-                    </p>
                 </form>
             </div>
-
-            {/* LISTA DE VÍDEOS */}
-            <h2 style={{fontSize: '1.4rem', marginBottom: '20px'}}>Vídeos Rastreados</h2>
+            <h2 style={{fontSize: '1.4rem', marginBottom: '20px'}}>Meus Envios</h2>
             <div style={{display: 'flex', flexDirection: 'column', gap: '15px'}}>
                 {myVideos.length === 0 ? (
-                    <div style={{padding: '40px', textAlign: 'center', background: 'var(--bg-card)', borderRadius: '12px', border: '1px dashed var(--border)', color: 'var(--text-muted)'}}>
-                        Você ainda não cadastrou nenhum vídeo.
-                    </div>
+                    <div style={{padding: '40px', textAlign: 'center', background: 'var(--bg-card)', borderRadius: '12px', border: '1px dashed var(--border)', color: 'var(--text-muted)'}}>Nenhum vídeo registrado.</div>
                 ) : (
                     myVideos.map(video => (
                         <div key={video.id} style={{background: 'var(--bg-card)', padding: '20px', borderRadius: '12px', border: '1px solid var(--border)', display: 'flex', flexWrap: 'wrap', gap: '20px', alignItems: 'center', justifyContent: 'space-between'}}>
                             <div style={{display: 'flex', gap: '15px', alignItems: 'center', minWidth: '300px'}}>
-                                <div className={`video-platform-icon ${video.platform === 'youtube' ? 'youtube-bg' : video.platform === 'tiktok' ? 'tiktok-bg' : 'instagram-bg'}`}>
-                                    <Icons.Play size={16} />
-                                </div>
-                                <div style={{overflow: 'hidden'}}>
-                                    <div style={{fontWeight: 'bold', fontSize: '1rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '200px'}}>
-                                        {video.campaignTitle}
-                                    </div>
-                                    <a href={video.url} target="_blank" rel="noreferrer" style={{fontSize: '0.85rem', color: 'var(--primary)', textDecoration: 'none'}}>
-                                        Abrir Link Original ↗
-                                    </a>
-                                </div>
+                                <div className={`video-platform-icon ${video.platform === 'youtube' ? 'youtube-bg' : video.platform === 'tiktok' ? 'tiktok-bg' : 'instagram-bg'}`}><Icons.Play size={16} /></div>
+                                <div><div style={{fontWeight: 'bold', fontSize: '1rem'}}>{video.campaignTitle}</div><a href={video.url} target="_blank" rel="noreferrer" style={{fontSize: '0.85rem', color: 'var(--primary)', textDecoration: 'none'}}>Abrir Link ↗</a></div>
                             </div>
-
-                            <div style={{display: 'flex', gap: '30px', alignItems: 'center', flex: 1, justifyContent: 'center'}}>
-                                <div style={{textAlign: 'center'}}>
-                                    <div style={{fontSize: '0.8rem', color: 'var(--text-muted)'}}>Visualizações</div>
-                                    <div style={{fontSize: '1.3rem', fontWeight: 'bold', color: 'var(--text-main)'}}>{video.views.toLocaleString()}</div>
-                                </div>
-                                <div style={{textAlign: 'center'}}>
-                                    <div style={{fontSize: '0.8rem', color: 'var(--text-muted)'}}>Status</div>
-                                    <div style={{
-                                        fontSize: '0.9rem', fontWeight: '600',
-                                        color: video.status === 'approved' ? 'var(--success)' : video.status === 'rejected' ? 'var(--danger)' : 'var(--warning)'
-                                    }}>
-                                        {video.status === 'approved' ? 'Aprovado' : video.status === 'rejected' ? 'Rejeitado' : 'Em Análise'}
-                                    </div>
-                                </div>
-                            </div>
-
-                            <button 
-                                onClick={() => handleRefreshStats(video)}
-                                className="btn btn-outline" 
-                                style={{fontSize: '0.85rem', padding: '8px 16px', minWidth: '140px'}}
-                                disabled={refreshingVideoId === video.id}
-                            >
-                                {refreshingVideoId === video.id ? 'Atualizando...' : 'Atualizar Views'}
-                            </button>
+                            <div style={{textAlign: 'center'}}><div style={{fontSize: '0.8rem', color: 'var(--text-muted)'}}>Status</div><div style={{fontWeight: 'bold', color: 'var(--warning)'}}>Em Análise</div></div>
+                            <div style={{textAlign: 'center'}}><div style={{fontSize: '0.8rem', color: 'var(--text-muted)'}}>Views Iniciais</div><div style={{fontSize: '1.3rem', fontWeight: 'bold'}}>{video.views.toLocaleString()}</div></div>
                         </div>
                     ))
                 )}
@@ -547,7 +496,6 @@ export default function ClipperDashboard() {
           </div>
         )}
 
-        {/* --- OUTRAS VIEWS (EXPERIENCE, RANKINGS, SETTINGS) --- */}
         {view === 'experience' && (
           <div className="fade-in-up">
             <h1 style={{ fontSize: '1.8rem', marginBottom: '30px' }}>Meu Progresso</h1>
@@ -570,13 +518,6 @@ export default function ClipperDashboard() {
                 </div>
             </div>
           </div>
-        )}
-        
-        {view === 'rankings' && (
-           <div className="fade-in-up">
-             <h1 style={{fontSize: '1.8rem', marginBottom: '20px'}}>Rankings</h1>
-             <p style={{color: 'var(--text-muted)'}}>Em breve: Disputas semanais entre clipadores.</p>
-           </div>
         )}
 
         {view === 'settings' && (
