@@ -886,6 +886,9 @@ body {
     z-index: 45;
     backdrop-filter: blur(2px);
   }
+  hide-mobile {
+    display: none;
+  }
 }
 
 /* --- THEME TOGGLE (DESKTOP) --- */
@@ -1136,4 +1139,21 @@ body {
 
 .faq-item.active .faq-icon {
   transform: rotate(45deg); /* Transforma o + em x */
+}
+
+.campaign-card {
+  flex-direction: column;
+}
+
+.ranking-list {
+  flex-direction: column;
+}
+
+.rank-tab-container {
+  flex-direction: row-reverse;
+  justify-content: flex-end;
+}
+
+.ranking-item {
+  align-items: center;
 }

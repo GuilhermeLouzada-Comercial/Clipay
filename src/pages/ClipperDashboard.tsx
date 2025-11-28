@@ -50,6 +50,8 @@ interface Campaign {
   requiredHashtag: string;
   requiredMention: string;
   status: 'active' | 'full' | 'finished' | 'pending_payment';
+  startDate?: string;
+  endDate?: string;
   createdAt?: any;
 }
 
@@ -62,16 +64,44 @@ interface SubmittedVideo {
     campaignTitle: string;
     status: 'pending' | 'approved' | 'rejected';
     lastUpdated: any;
-    createdAt?: any; // Adicionado para ordenação
+    createdAt?: any;
 }
 
-type ViewType = 'overview' | 'campaigns' | 'my-videos' | 'experience' | 'rankings' | 'settings';
+// Adicionada a view 'campaign-details'
+type ViewType = 'overview' | 'campaigns' | 'campaign-details' | 'my-videos' | 'experience' | 'rankings' | 'settings';
+
+// --- HELPER MOCK RANKING ---
+const generateMockRanking = (type: 'total' | 'weekly' | 'daily', myName: string) => {
+  const users = [
+    { name: 'Pedro Cortes', views: 0, avatar: 'PC' },
+    { name: 'Maria Clips', views: 0, avatar: 'MC' },
+    { name: myName || 'Eu', views: 0, avatar: 'ME', isMe: true },
+    { name: 'João Viral', views: 0, avatar: 'JV' },
+    { name: 'Ana TikTok', views: 0, avatar: 'AT' },
+    { name: 'Carlos Edit', views: 0, avatar: 'CE' },
+    { name: 'Julia Reels', views: 0, avatar: 'JR' },
+  ];
+
+  const multiplier = type === 'total' ? 50000 : type === 'weekly' ? 10000 : 2000;
+  
+  const ranking = users.map(u => ({
+    ...u,
+    views: Math.floor(Math.random() * multiplier) + 500
+  })).sort((a, b) => b.views - a.views);
+
+  return ranking;
+};
 
 // --- FUNÇÕES AUXILIARES ---
-
 const formatCurrency = (value: number) => {
   if (isNaN(value)) return "R$ 0,00";
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
+};
+
+const formatDate = (dateString?: string) => {
+  if (!dateString) return 'Indefinido';
+  const [year, month, day] = dateString.split('-');
+  return `${day}/${month}/${year}`;
 };
 
 const detectPlatform = (url: string): 'youtube' | 'tiktok' | 'instagram' | 'unknown' => {
@@ -91,23 +121,9 @@ const fetchVideoStats = async (url: string, platform: string, currentViews = 0) 
 };
 
 const StatCard = ({ label, value, icon: Icon, color }: any) => (
-  <div style={{ 
-    background: 'var(--bg-card)', 
-    padding: '20px', 
-    borderRadius: '12px', 
-    border: '1px solid var(--border)', 
-    display: 'flex', 
-    alignItems: 'center', 
-    gap: '15px',
-    boxShadow: 'var(--shadow-card)'
-  }}>
-    <div style={{ width: '45px', height: '45px', borderRadius: '10px', background: `${color}20`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: color }}>
-      <Icon size={24} />
-    </div>
-    <div>
-      <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{label}</div>
-      <div style={{ fontSize: '1.5rem', fontWeight: '700', color: 'var(--text-main)' }}>{value}</div>
-    </div>
+  <div style={{ background: 'var(--bg-card)', padding: '20px', borderRadius: '12px', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: '15px', boxShadow: 'var(--shadow-card)' }}>
+    <div style={{ width: '45px', height: '45px', borderRadius: '10px', background: `${color}20`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: color }}><Icon size={24} /></div>
+    <div><div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{label}</div><div style={{ fontSize: '1.5rem', fontWeight: '700', color: 'var(--text-main)' }}>{value}</div></div>
   </div>
 );
 
@@ -116,7 +132,6 @@ const CircularProgress = ({ value, max, color, size = 200, strokeWidth = 15 }: {
   const circumference = radius * 2 * Math.PI;
   const percent = max > 0 ? Math.min(Math.max(value / max, 0), 1) : 1;
   const dashOffset = circumference - percent * circumference;
-
   return (
     <div style={{ position: 'relative', width: size, height: size, margin: '0 auto' }}>
       <svg width={size} height={size} style={{ transform: 'rotate(-90deg)' }}>
@@ -146,8 +161,11 @@ export default function ClipperDashboard() {
   const [videoUrl, setVideoUrl] = useState('');
   const [selectedCampaignId, setSelectedCampaignId] = useState('');
   const [submittingVideo, setSubmittingVideo] = useState(false);
-  
   const [refreshingId, setRefreshingId] = useState<string | null>(null);
+
+  // Estados da PÁGINA DE DETALHES
+  const [selectedCampaignForDetails, setSelectedCampaignForDetails] = useState<Campaign | null>(null);
+  const [rankingTab, setRankingTab] = useState<'total' | 'weekly' | 'daily'>('daily');
 
   const getCurrentRank = () => {
     const xp = userData.xp || 0;
@@ -161,14 +179,12 @@ export default function ClipperDashboard() {
     const fetchAllData = async () => {
       if (!auth.currentUser) return;
       try {
-        // 1. Dados do Usuário
         const userDoc = await getDoc(doc(db, "users", auth.currentUser.uid));
         if (userDoc.exists()) {
           const data = userDoc.data();
           setUserData({ ...data, xp: data.xp || 0, joinedCampaigns: data.joinedCampaigns || [] } as UserData);
         }
 
-        // 2. Campanhas
         const q = query(collection(db, "campaigns"), where("status", "==", "active"));
         const querySnapshot = await getDocs(q);
         const fetchedCampaigns: Campaign[] = [];
@@ -183,40 +199,22 @@ export default function ClipperDashboard() {
             description: data.description || "",
             requiredHashtag: data.requiredHashtag || "",
             requiredMention: data.requiredMention || "",
+            startDate: data.startDate,
+            endDate: data.endDate,
             status: data.status,
             createdAt: data.createdAt
           });
         });
         setAvailableCampaigns(fetchedCampaigns);
 
-        // 3. Meus Vídeos (Ordenação no CLIENTE para evitar erro de índice do Firestore)
-        const videosQuery = query(
-            collection(db, "videos"), 
-            where("userId", "==", auth.currentUser.uid)
-            // orderBy("lastUpdated", "desc") REMOVIDO PARA EVITAR ERRO DE INDEX
-        );
+        const videosQuery = query(collection(db, "videos"), where("userId", "==", auth.currentUser.uid));
         const videosSnap = await getDocs(videosQuery);
-        
         const videosList = videosSnap.docs.map(d => ({ id: d.id, ...d.data() } as SubmittedVideo));
-        
-        // Ordena via Javascript (Mais seguro para protótipo)
-        videosList.sort((a, b) => {
-            const dateA = a.lastUpdated?.seconds || 0;
-            const dateB = b.lastUpdated?.seconds || 0;
-            return dateB - dateA;
-        });
-
+        videosList.sort((a, b) => (b.lastUpdated?.seconds || 0) - (a.lastUpdated?.seconds || 0));
         setMyVideos(videosList);
-
-      } catch (error) {
-        console.error(error);
-      } finally {
-        setLoading(false);
-      }
+      } catch (error) { console.error(error); } finally { setLoading(false); }
     };
     fetchAllData();
-
-    // Tema
     const savedTheme = localStorage.getItem('clipay-theme') as 'dark' | 'light' | null;
     if (savedTheme) { setTheme(savedTheme); document.documentElement.setAttribute('data-theme', savedTheme); }
     else { document.documentElement.setAttribute('data-theme', 'light'); }
@@ -231,7 +229,8 @@ export default function ClipperDashboard() {
 
   const handleLogout = async () => { await signOut(auth); navigate('/login'); };
 
-  const handleJoinCampaign = async (campaignId: string) => {
+  const handleJoinCampaign = async (campaignId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
     if(!auth.currentUser) return;
     if(!window.confirm("Deseja entrar nessa campanha?")) return;
     try {
@@ -239,9 +238,15 @@ export default function ClipperDashboard() {
       await updateDoc(userRef, { joinedCampaigns: arrayUnion(campaignId), xp: (userData.xp || 0) + 50 });
       setUserData(prev => ({ ...prev, joinedCampaigns: [...(prev.joinedCampaigns || []), campaignId], xp: prev.xp + 50 }));
       alert("Você entrou na campanha com sucesso!");
-      setSelectedCampaignId(campaignId);
-      setView('my-videos');
     } catch (error) { console.error(error); alert("Erro ao entrar na campanha."); }
+  };
+
+  // NAVEGAÇÃO PARA DETALHES DA CAMPANHA (SUBSTITUI MODAL)
+  const openCampaignDetails = (campaign: Campaign) => {
+    setSelectedCampaignForDetails(campaign);
+    setView('campaign-details');
+    // Scroll para o topo ao mudar de view
+    window.scrollTo(0, 0);
   };
 
   const handleSubmitVideo = async (e: React.FormEvent) => {
@@ -258,19 +263,14 @@ export default function ClipperDashboard() {
       try {
           const campaign = availableCampaigns.find(c => c.id === selectedCampaignId);
           if (!campaign) throw new Error("Campanha não encontrada");
-
           const stats = await fetchVideoStats(videoUrl, platform, 0);
-
           const newVideo = {
             userId: auth.currentUser.uid, url: videoUrl, platform, views: stats.views,
             campaignId: selectedCampaignId, campaignTitle: campaign.title,
             requiredHashtag: campaign.requiredHashtag, requiredMention: campaign.requiredMention,
-            status: 'pending' as const, 
-            lastUpdated: serverTimestamp(), createdAt: serverTimestamp()
+            status: 'pending' as const, lastUpdated: serverTimestamp(), createdAt: serverTimestamp()
           };
-        
           const docRef = await addDoc(collection(db, "videos"), newVideo);
-          
           setMyVideos(prev => [{ id: docRef.id, ...newVideo, lastUpdated: new Date() } as SubmittedVideo, ...prev]);
           const userRef = doc(db, "users", auth.currentUser.uid);
           await updateDoc(userRef, { xp: (userData.xp || 0) + 100 });
@@ -299,6 +299,10 @@ export default function ClipperDashboard() {
   const changeView = (newView: ViewType) => { setView(newView); setIsMobileMenuOpen(false); };
   const getSelectedCampaignDetails = () => availableCampaigns.find(c => c.id === selectedCampaignId);
 
+  // Filtros de Campanhas
+  const myCampaignsList = availableCampaigns.filter(c => userData.joinedCampaigns?.includes(c.id));
+  const availableList = availableCampaigns.filter(c => !userData.joinedCampaigns?.includes(c.id));
+
   if (loading) return <div style={{height: '100vh', display: 'flex', justifyContent: 'center', alignItems: 'center', background: 'var(--bg-dark)', color: 'var(--text-main)'}}>Carregando...</div>;
 
   return (
@@ -308,15 +312,42 @@ export default function ClipperDashboard() {
         .dash-input-wrapper { display: flex; alignItems: center; background: var(--bg-card-hover); border: 1px solid var(--border); borderRadius: 8px; padding: 0 12px; transition: var(--transition); }
         .dash-input-wrapper:focus-within { border-color: var(--primary); boxShadow: 0 0 0 2px rgba(59, 130, 246, 0.2); }
         .dash-input { background: transparent; border: none; color: var(--text-main); width: 100%; padding: 12px 0; outline: none; }
-        .campaign-card { background: var(--bg-card); border: 1px solid var(--border); borderRadius: 12px; padding: 25px; transition: all 0.3s ease; display: flex; flexDirection: column; justify-content: center; height: 100%; min-height: 280px; }
+        
+        /* GRID CUSTOMIZADO - RESOLVE O PROBLEMA DE CARD GIGANTE */
+        .campaign-grid {
+            display: grid;
+            /* auto-fill: preenche o máximo de colunas que der, se sobrar espaço no final da linha, deixa vazio (não estica) */
+            grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+            gap: 20px;
+        }
+
+        .campaign-card { background: var(--bg-card); border: 1px solid var(--border); borderRadius: 12px; padding: 25px; transition: all 0.3s ease; display: flex; height: 100%; min-height: 280px; position: relative; }
         .campaign-card:hover { transform: translateY(-5px); border-color: var(--primary); box-shadow: var(--shadow-card); }
+        
+        .campaign-card.clickable { cursor: pointer; border-left: 4px solid var(--primary); }
+        .campaign-card.clickable:hover { background: var(--bg-card-hover); }
+
         .video-platform-icon { display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 50%; color: white; }
         .youtube-bg { background: #FF0000; }
         .tiktok-bg { background: #000000; }
         .instagram-bg { background: linear-gradient(45deg, #f09433 0%, #e6683c 25%, #dc2743 50%, #cc2366 75%, #bc1888 100%); }
         .requirement-box { background: rgba(251, 191, 36, 0.1); border: 1px solid rgba(251, 191, 36, 0.3); color: #d97706; padding: 15px; border-radius: 8px; margin-top: 15px; font-size: 0.9rem; }
         [data-theme="dark"] .requirement-box { color: #fbbf24; }
-        }
+        @media (max-width: 768px) { .desktop-theme-toggle { display: none !important; } }
+
+        /* RANKING NA PÁGINA DE DETALHES */
+        .rank-tab-container { display: flex; gap: 10px; margin-bottom: 20px; border-bottom: 1px solid var(--border); padding-bottom: 10px; }
+        .rank-tab { background: none; border: none; padding: 10px 20px; cursor: pointer; color: var(--text-muted); font-weight: 600; border-radius: 8px; transition: all 0.2s; font-size: 1rem; }
+        .rank-tab:hover { background: var(--bg-card-hover); color: var(--text-main); }
+        .rank-tab.active { background: var(--primary); color: white; }
+        
+        .ranking-list { display: flex; flexDirection: column; gap: 10px; }
+        .ranking-item { display: flex; alignItems: center; justify-content: space-between; padding: 20px; background: var(--bg-card-hover); border-radius: 8px; border: 1px solid var(--border); transition: transform 0.2s; }
+        .ranking-item:hover { transform: translateX(5px); border-color: var(--primary); }
+        .ranking-pos { width: 40px; font-weight: bold; color: var(--text-muted); font-size: 1.1rem; }
+        .ranking-name { flex: 1; font-weight: 600; display: flex; align-items: center; gap: 15px; font-size: 1.05rem; }
+        .ranking-score { font-weight: bold; color: var(--success); font-size: 1.1rem; }
+        .medal { margin-right: 5px; font-size: 1.2rem; }
       `}</style>
 
       {/* HEADER MOBILE */}
@@ -337,17 +368,13 @@ export default function ClipperDashboard() {
         </div>
         <nav className="sidebar-nav">
           <button onClick={() => changeView('overview')} className={`sidebar-btn ${view === 'overview' ? 'active' : ''}`}><Icons.BarChart3 size={20} /> Visão Geral</button>
-          <button onClick={() => changeView('campaigns')} className={`sidebar-btn ${view === 'campaigns' ? 'active' : ''}`}><Icons.Briefcase size={20} /> Campanhas</button>
+          <button onClick={() => changeView('campaigns')} className={`sidebar-btn ${view === 'campaigns' || view === 'campaign-details' ? 'active' : ''}`}><Icons.Briefcase size={20} /> Campanhas</button>
           <button onClick={() => changeView('my-videos')} className={`sidebar-btn ${view === 'my-videos' ? 'active' : ''}`}><Icons.Play size={20} /> Meus Vídeos</button>
           <button onClick={() => changeView('experience')} className={`sidebar-btn ${view === 'experience' ? 'active' : ''}`}><Icons.Target size={20} /> Nível & XP</button>
           <button onClick={() => changeView('settings')} className={`sidebar-btn ${view === 'settings' ? 'active' : ''}`}><Icons.User size={20} /> Configurações</button>
         </nav>
-        
-        {/* Toggle de Tema e Logout no Rodapé da Sidebar */}
         <div className="sidebar-footer" style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
           <button onClick={handleLogout} className="sidebar-btn" style={{ color: 'var(--danger)', width: 'auto', flex: 1 }}><Icons.LogOut size={20} /> Sair</button>
-          
-          {/* Toggle de Tema dentro do Menu (visível no mobile e desktop) */}
           <div onClick={toggleTheme} style={{ width: '60px', height: '32px', padding: '4px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', background: 'var(--bg-card-hover)', border: '1px solid var(--border)', borderRadius: '30px', position: 'relative', marginLeft: '10px' }}>
             <div className="theme-toggle-bg" style={{ position: 'absolute', left: '4px', width: '24px', height: '24px', borderRadius: '50%', background: 'var(--primary)', transition: 'transform 0.3s ease', transform: theme === 'dark' ? 'translateX(28px)' : 'translateX(0)' }}></div>
             <div style={{ zIndex: 2, width: '24px', display: 'flex', justifyContent: 'center' }}><Icons.Sun size={14} color={theme === 'light' ? 'white' : 'var(--text-muted)'} /></div>
@@ -357,7 +384,12 @@ export default function ClipperDashboard() {
       </aside>
 
       <main className="main-content">
-        {/* ... (Visão Geral e Campanhas mantidos iguais) ... */}
+        <div className="desktop-theme-toggle" onClick={toggleTheme} style={{ position: 'absolute', top: '30px', right: '40px', width: '74px', height: '36px', padding: '4px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '30px', boxShadow: 'var(--shadow-card)', zIndex: 10 }}>
+            <div className="theme-toggle-bg" style={{ position: 'absolute', left: '4px', width: '28px', height: '28px', borderRadius: '50%', background: 'var(--primary)', transition: 'transform 0.3s ease', transform: theme === 'dark' ? 'translateX(38px)' : 'translateX(0)' }}></div>
+            <div style={{ zIndex: 2, width: '28px', display: 'flex', justifyContent: 'center' }}><Icons.Sun size={18} color={theme === 'light' ? 'white' : 'var(--text-muted)'} /></div>
+            <div style={{ zIndex: 2, width: '28px', display: 'flex', justifyContent: 'center' }}><Icons.Moon size={18} color={theme === 'dark' ? 'white' : 'var(--text-muted)'} /></div>
+        </div>
+
         {view === 'overview' && (
           <div className="fade-in-up">
             <div style={{ display: 'flex', alignItems: 'center', gap: '15px', marginBottom: '30px' }}>
@@ -374,62 +406,157 @@ export default function ClipperDashboard() {
               <StatCard label="XP Atual" value={userData.xp.toString()} icon={Icons.Target} color={currentRank.color} />
               <StatCard label="Campanhas Participando" value={(userData.joinedCampaigns?.length || 0).toString()} icon={Icons.Briefcase} color="var(--primary)" />
             </div>
-             {availableCampaigns.length > 0 && userData.joinedCampaigns?.length === 0 && (
-               <div style={{background: 'var(--bg-card)', padding: '30px', borderRadius: '12px', border: '1px solid var(--primary)', textAlign: 'center', marginBottom: '30px'}}>
-                  <h3 style={{marginBottom: '10px'}}>Comece sua jornada!</h3>
-                  <p style={{color: 'var(--text-muted)', marginBottom: '20px'}}>Você ainda não entrou em nenhuma campanha.</p>
-                  <button className="btn btn-primary" onClick={() => changeView('campaigns')}>Ver Campanhas Disponíveis</button>
-               </div>
-            )}
           </div>
         )}
 
         {view === 'campaigns' && (
           <div className="fade-in-up">
-            <h1 style={{ fontSize: '1.8rem', marginBottom: '10px' }}>Campanhas Disponíveis</h1>
-            <p style={{ color: 'var(--text-muted)', marginBottom: '30px' }}>Escolha um desafio e clique em Entrar.</p>
-            {availableCampaigns.length === 0 ? (
-                <div style={{textAlign: 'center', padding: '40px', color: 'var(--text-muted)'}}><Icons.Briefcase size={40} style={{marginBottom: '10px', opacity: 0.5}} /><p>Nenhuma campanha ativa no momento.</p></div>
+            {/* SEÇÃO 1: MINHAS CAMPANHAS */}
+            <h2 style={{ fontSize: '1.4rem', marginBottom: '15px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <Icons.CheckCircle size={24} color="var(--success)" /> Minhas Campanhas (Clique para ver)
+            </h2>
+            
+            {myCampaignsList.length === 0 ? (
+                <p style={{color: 'var(--text-muted)', marginBottom: '40px'}}>Você ainda não entrou em nenhuma campanha.</p>
             ) : (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '20px' }}>
-                    {availableCampaigns.map(camp => {
-                        const isJoined = userData.joinedCampaigns?.includes(camp.id);
-                        return (
-                            <div key={camp.id} className="campaign-card">
-                                <div>
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '15px' }}>
-                                        <div style={{ fontWeight: 'bold', fontSize: '1.1rem', lineHeight: '1.3' }}>{camp.title}</div>
-                                        <span style={{ fontSize: '0.75rem', color: 'var(--success)', background: 'rgba(16, 185, 129, 0.1)', padding: '4px 8px', borderRadius: '4px', whiteSpace: 'nowrap' }}>Aberta</span>
-                                    </div>
-                                    <div style={{ marginBottom: '15px', fontSize: '0.9rem', color: 'var(--text-muted)', display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{camp.description}</div>
-                                    <div style={{ marginBottom: '20px' }}>
-                                        <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Orçamento Total / CPM</div>
-                                        <div style={{ display: 'flex', gap: '8px', alignItems: 'baseline', flexWrap: 'wrap' }}>
-                                            <div style={{ fontSize: '1.2rem', fontWeight: 'bold', color: 'var(--success)' }}>{formatCurrency(camp.budget)}</div>
-                                            <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>({formatCurrency(camp.cpm)}/1k views)</div>
-                                        </div>
-                                    </div>
-                                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '25px' }}>
-                                        {camp.requiredHashtag && <span style={{ fontSize: '0.75rem', background: 'var(--bg-card-hover)', border: '1px solid var(--border)', padding: '4px 8px', borderRadius: '12px', color: 'var(--primary)' }}>#{camp.requiredHashtag}</span>}
-                                        {camp.requiredMention && <span style={{ fontSize: '0.75rem', background: 'var(--bg-card-hover)', border: '1px solid var(--border)', padding: '4px 8px', borderRadius: '12px' }}>@{camp.requiredMention}</span>}
-                                    </div>
-
-                                  <div style={{ marginTop: 'auto' }}>
-                                    {isJoined ? (
-                                        <button className="btn btn-outline" style={{ width: '100%', borderColor: 'var(--success)', color: 'var(--success)', cursor: 'default' }} onClick={() => { setSelectedCampaignId(camp.id); changeView('my-videos'); }}>
-                                            <Icons.CheckCircle size={16} style={{marginRight: '5px'}}/> Você participa
-                                        </button>
-                                    ) : (
-                                        <button className="btn btn-primary" style={{ width: '100%' }} onClick={() => handleJoinCampaign(camp.id)}>Entrar na Campanha</button>
-                                    )}
-                                  </div>
+                <div className="campaign-grid" style={{ marginBottom: '50px' }}>
+                    {myCampaignsList.map(camp => (
+                        <div key={camp.id} className="campaign-card clickable" onClick={() => openCampaignDetails(camp)}>
+                            <div>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '15px' }}>
+                                    <div style={{ fontWeight: 'bold', fontSize: '1.1rem', lineHeight: '1.3' }}>{camp.title}</div>
+                                    <span style={{ fontSize: '0.75rem', color: 'var(--success)', background: 'rgba(16, 185, 129, 0.1)', padding: '4px 8px', borderRadius: '4px' }}>Participando</span>
+                                </div>
+                                <div style={{fontSize: '0.9rem', color: 'var(--text-muted)', marginBottom: '10px'}}>
+                                    {camp.description.length > 80 ? camp.description.substring(0, 80) + '...' : camp.description}
+                                </div>
+                                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '15px' }}>
+                                    <span style={{ fontSize: '0.75rem', background: 'var(--bg-card-hover)', border: '1px solid var(--border)', padding: '4px 8px', borderRadius: '12px', color: 'var(--primary)' }}>#{camp.requiredHashtag}</span>
+                                    {camp.endDate && <span style={{ fontSize: '0.75rem', background: 'var(--bg-card-hover)', border: '1px solid var(--border)', padding: '4px 8px', borderRadius: '12px' }}><Icons.Clock size={10} /> Fim: {formatDate(camp.endDate)}</span>}
                                 </div>
                             </div>
-                        );
-                    })}
+                            <div className="btn btn-primary" style={{ marginTop: 'auto' }}>
+                                Ver Ranking e Detalhes →
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            )}
+
+            {/* SEÇÃO 2: CAMPANHAS DISPONÍVEIS */}
+            <h2 style={{ fontSize: '1.4rem', marginBottom: '15px', display: 'flex', alignItems: 'center', gap: '10px', paddingTop: '20px', borderTop: '1px solid var(--border)' }}>
+                <Icons.Briefcase size={24} color="var(--primary)" /> Disponíveis para Entrar
+            </h2>
+
+            {availableList.length === 0 ? (
+                <p style={{color: 'var(--text-muted)'}}>Não há novas campanhas no momento.</p>
+            ) : (
+                <div className="campaign-grid">
+                    {availableList.map(camp => (
+                        <div key={camp.id} className="campaign-card">
+                            <div>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '15px' }}>
+                                    <div style={{ fontWeight: 'bold', fontSize: '1.1rem', lineHeight: '1.3' }}>{camp.title}</div>
+                                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', background: 'var(--bg-card-hover)', padding: '4px 8px', borderRadius: '4px' }}>Disponível</span>
+                                </div>
+                                <div style={{ marginBottom: '15px', fontSize: '0.9rem', color: 'var(--text-muted)', display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{camp.description}</div>
+                                <div style={{ marginBottom: '20px' }}>
+                                    <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Orçamento Total / CPM</div>
+                                    <div style={{ display: 'flex', gap: '8px', alignItems: 'baseline', flexWrap: 'wrap' }}>
+                                        <div style={{ fontSize: '1.2rem', fontWeight: 'bold', color: 'var(--success)' }}>{formatCurrency(camp.budget)}</div>
+                                        <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>({formatCurrency(camp.cpm)}/1k views)</div>
+                                    </div>
+                                </div>
+                                {camp.endDate && <div style={{fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '15px'}}><Icons.Clock size={12} /> Prazo: {formatDate(camp.startDate)} até {formatDate(camp.endDate)}</div>}
+                            </div>
+                            <button className="btn btn-primary" style={{ width: '100%', marginTop: 'auto' }} onClick={(e) => handleJoinCampaign(camp.id, e)}>Entrar na Campanha</button>
+                        </div>
+                    ))}
                 </div>
             )}
           </div>
+        )}
+
+        {/* --- PÁGINA DE DETALHES DA CAMPANHA (NOVA) --- */}
+        {view === 'campaign-details' && selectedCampaignForDetails && (
+            <div className="fade-in-up">
+                <button 
+                    onClick={() => setView('campaigns')} 
+                    style={{background: 'none', border: 'none', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '5px', cursor: 'pointer', marginBottom: '20px', fontSize: '0.9rem'}}
+                >
+                    <Icons.ArrowRight size={16} style={{transform: 'rotate(180deg)'}} /> Voltar para Campanhas
+                </button>
+
+                {/* Cabeçalho da Campanha */}
+                <div style={{background: 'var(--bg-card)', padding: '30px', borderRadius: '16px', border: '1px solid var(--border)', marginBottom: '30px'}}>
+                    <div style={{display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '20px', marginBottom: '20px'}}>
+                        <div>
+                            <h1 style={{fontSize: '2rem', marginBottom: '10px'}}>{selectedCampaignForDetails.title}</h1>
+                            <div style={{display: 'flex', gap: '15px', color: 'var(--text-muted)', fontSize: '0.9rem'}}>
+                                <span><Icons.Clock size={14} /> Início: {formatDate(selectedCampaignForDetails.startDate)}</span>
+                                <span><Icons.Clock size={14} /> Fim: {formatDate(selectedCampaignForDetails.endDate)}</span>
+                            </div>
+                        </div>
+                        <div style={{textAlign: 'right'}}>
+                            <div style={{fontSize: '0.9rem', color: 'var(--text-muted)'}}>CPM da Campanha</div>
+                            <div style={{fontSize: '1.5rem', fontWeight: 'bold', color: 'var(--success)'}}>{formatCurrency(selectedCampaignForDetails.cpm)} <span style={{fontSize: '0.9rem', color: 'var(--text-muted)'}}>/1k views</span></div>
+                        </div>
+                    </div>
+
+                    <div style={{background: 'var(--bg-card-hover)', padding: '20px', borderRadius: '12px', border: '1px solid var(--border)', marginBottom: '20px'}}>
+                        <h3 style={{fontSize: '1.1rem', marginBottom: '10px'}}>Regras e Descrição</h3>
+                        <p style={{color: 'var(--text-muted)', lineHeight: '1.6', marginBottom: '15px'}}>{selectedCampaignForDetails.description}</p>
+                        <div style={{display: 'flex', gap: '20px', flexWrap: 'wrap'}}>
+                            <div style={{display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--primary)', fontWeight: '600'}}>
+                                <Icons.AlertCircle size={18} /> Hashtag: #{selectedCampaignForDetails.requiredHashtag}
+                            </div>
+                            <div style={{display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--primary)', fontWeight: '600'}}>
+                                <Icons.User size={18} /> Marcar: @{selectedCampaignForDetails.requiredMention}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div style={{textAlign: 'center'}}>
+                        <button className="btn btn-primary" onClick={() => {
+                            setSelectedCampaignId(selectedCampaignForDetails.id);
+                            changeView('my-videos');
+                        }} style={{padding: '12px 30px', fontSize: '1rem'}}>
+                            <Icons.Play size={20} style={{marginRight: '8px'}} /> Enviar Vídeo para essa Campanha
+                        </button>
+                    </div>
+                </div>
+
+                {/* Seção de Ranking */}
+                <h2 style={{fontSize: '1.5rem', marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '10px'}}>
+                    <Icons.Trophy size={28} color="#fbbf24" /> Ranking da Campanha
+                </h2>
+                
+                <div style={{background: 'var(--bg-card)', borderRadius: '16px', border: '1px solid var(--border)', padding: '20px'}}>
+                    <div className="rank-tab-container">
+                        <button className={`rank-tab ${rankingTab === 'total' ? 'active' : ''}`} onClick={() => setRankingTab('total')}>Total</button>
+                        <button className={`rank-tab ${rankingTab === 'weekly' ? 'active' : ''}`} onClick={() => setRankingTab('weekly')}>Semanal</button>
+                        <button className={`rank-tab ${rankingTab === 'daily' ? 'active' : ''}`} onClick={() => setRankingTab('daily')}>Diário</button>
+                    </div>
+
+                    <div className="ranking-list">
+                        {generateMockRanking(rankingTab, userData.name).map((user, index) => (
+                            <div key={index} className="ranking-item" style={user.isMe ? {borderColor: 'var(--primary)', background: 'rgba(59, 130, 246, 0.1)'} : {}}>
+                                <div className="ranking-pos">
+                                    {index === 0 ? <span className="medal">🥇</span> : 
+                                     index === 1 ? <span className="medal">🥈</span> : 
+                                     index === 2 ? <span className="medal">🥉</span> : 
+                                     `#${index + 1}`}
+                                </div>
+                                <div className="ranking-name">
+                                    <div style={{width: '36px', height: '36px', borderRadius: '50%', background: 'var(--bg-card)', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.8rem', fontWeight: 'bold'}}>{user.avatar}</div>
+                                    {user.name}
+                                </div>
+                                <div className="ranking-score">{user.views.toLocaleString()} <span style={{fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: 'normal'}}>Views</span></div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            </div>
         )}
 
         {view === 'my-videos' && (
@@ -442,17 +569,9 @@ export default function ClipperDashboard() {
                         <div>
                             <label style={{ display: 'block', marginBottom: '8px', fontSize: '0.9rem', color: 'var(--text-muted)' }}>Selecione a Campanha que você participa</label>
                             <div className="dash-input-wrapper">
-                                <select 
-                                    className="dash-input" 
-                                    style={{ cursor: 'pointer', color: selectedCampaignId ? 'var(--text-main)' : 'var(--text-muted)' }}
-                                    value={selectedCampaignId}
-                                    onChange={(e) => setSelectedCampaignId(e.target.value)}
-                                    required
-                                >
+                                <select className="dash-input" style={{ cursor: 'pointer', color: selectedCampaignId ? 'var(--text-main)' : 'var(--text-muted)' }} value={selectedCampaignId} onChange={(e) => setSelectedCampaignId(e.target.value)} required>
                                     <option value="" disabled>Selecione...</option>
-                                    {availableCampaigns.filter(c => userData.joinedCampaigns?.includes(c.id)).map(c => (
-                                        <option key={c.id} value={c.id} style={{color: 'black'}}>{c.title}</option>
-                                    ))}
+                                    {availableCampaigns.filter(c => userData.joinedCampaigns?.includes(c.id)).map(c => (<option key={c.id} value={c.id} style={{color: 'black'}}>{c.title}</option>))}
                                 </select>
                             </div>
                         </div>
@@ -482,7 +601,6 @@ export default function ClipperDashboard() {
                     </button>
                 </form>
             </div>
-
             <h2 style={{fontSize: '1.4rem', marginBottom: '20px'}}>Meus Envios</h2>
             <div style={{display: 'flex', flexDirection: 'column', gap: '15px'}}>
                 {myVideos.length === 0 ? (
@@ -499,7 +617,6 @@ export default function ClipperDashboard() {
                                     </div>
                                 </div>
                             </div>
-
                             <div style={{display: 'flex', gap: '40px', alignItems: 'center', margin: '0 20px'}}>
                                 <div style={{textAlign: 'center'}}>
                                     <div style={{fontSize: '0.8rem', color: 'var(--text-muted)'}}>Status</div>
@@ -510,20 +627,12 @@ export default function ClipperDashboard() {
                                 <div style={{textAlign: 'center'}}>
                                     <div style={{fontSize: '0.8rem', color: 'var(--text-muted)'}}>Visualizações</div>
                                     <div style={{fontSize: '1.3rem', fontWeight: 'bold'}}>
-                                        {/* LÓGICA DE OCULTAR VIEWS SE NÃO APROVADO */}
                                         {video.status === 'approved' ? video.views.toLocaleString() : <span style={{fontSize: '1rem', color: 'var(--text-muted)'}}>---</span>}
                                     </div>
                                 </div>
                             </div>
-
-                            <button 
-                                onClick={() => handleRefreshVideo(video)}
-                                disabled={refreshingId === video.id}
-                                className="btn btn-outline"
-                                style={{fontSize: '0.85rem', padding: '8px 12px', display: 'flex', gap: '5px', opacity: refreshingId === video.id ? 0.7 : 1}}
-                            >
-                                <Icons.Clock size={16} />
-                                {refreshingId === video.id ? 'Atualizando...' : 'Atualizar Views'}
+                            <button onClick={() => handleRefreshVideo(video)} disabled={refreshingId === video.id} className="btn btn-outline" style={{fontSize: '0.85rem', padding: '8px 12px', display: 'flex', gap: '5px', opacity: refreshingId === video.id ? 0.7 : 1}}>
+                                <Icons.Clock size={16} /> {refreshingId === video.id ? 'Atualizando...' : 'Atualizar Views'}
                             </button>
                         </div>
                     ))
