@@ -279,16 +279,6 @@ export default function ClipperDashboard() {
       } catch (error) { console.error(error); alert("Erro ao enviar vídeo."); } finally { setSubmittingVideo(false); }
   };
 
-  const handleRefreshVideo = async (video: SubmittedVideo) => {
-    setRefreshingId(video.id);
-    try {
-      const stats = await fetchVideoStats(video.url, video.platform, video.views);
-      const videoRef = doc(db, "videos", video.id);
-      await updateDoc(videoRef, { views: stats.views, lastUpdated: serverTimestamp() });
-      setMyVideos(prev => prev.map(v => v.id === video.id ? { ...v, views: stats.views, lastUpdated: new Date() } : v));
-    } catch (error) { console.error("Erro:", error); alert("Falha ao atualizar."); } finally { setRefreshingId(null); }
-  };
-
   const handleSaveSettings = async (e: React.FormEvent) => {
     e.preventDefault(); setSaving(true);
     if (!auth.currentUser) return;
@@ -631,9 +621,6 @@ export default function ClipperDashboard() {
                                     </div>
                                 </div>
                             </div>
-                            <button onClick={() => handleRefreshVideo(video)} disabled={refreshingId === video.id} className="btn btn-outline" style={{fontSize: '0.85rem', padding: '8px 12px', display: 'flex', gap: '5px', opacity: refreshingId === video.id ? 0.7 : 1}}>
-                                <Icons.Clock size={16} /> {refreshingId === video.id ? 'Atualizando...' : 'Atualizar Views'}
-                            </button>
                         </div>
                     ))
                 )}

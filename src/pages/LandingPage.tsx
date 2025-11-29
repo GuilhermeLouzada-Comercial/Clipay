@@ -268,7 +268,7 @@ const DashboardPreview = ({ role }: { role: Role }) => {
         mainValue: formatCurrency(balance),
         btnText: 'Solicitar Pix',
         stats: [
-          { val: `#${rank}`, label: 'Ranking Global', color: 'var(--warning)' },
+          { val: `#${rank}`, label: 'Ranking Campanha', color: 'var(--warning)' },
           { val: videos.toString(), label: 'Vídeos Postados', color: 'var(--text-main)' },
           { val: formatCurrency(bonus), label: 'Bônus Hoje', color: 'var(--success)' },
         ],

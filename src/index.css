@@ -328,8 +328,11 @@ body {
 
 .stat-box {
   background: rgba(255, 255, 255, 0.03);
-  padding: 15px;
   border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
 }
 
 .stat-val {
@@ -717,9 +720,6 @@ body {
   }
   .hero-buttons {
     flex-direction: column;
-  }
-  .dash-stats {
-    grid-template-columns: 1fr;
   }
   .comparison-desktop {
     display: none;
