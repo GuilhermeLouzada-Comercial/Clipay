@@ -12,7 +12,9 @@ import {
   where, 
   getDocs, 
   serverTimestamp, 
-  arrayUnion 
+  arrayUnion,
+  orderBy,
+  limit
 } from 'firebase/firestore';
 import { useNavigate } from 'react-router-dom';
 
@@ -28,15 +30,16 @@ const XP_RULES = [
   { action: 'Entrar em Campanha', xp: 50, icon: Icons.Briefcase },
   { action: 'Vídeo Postado', xp: 100, icon: Icons.Play },
   { action: 'Vídeo Aprovado', xp: 300, icon: Icons.CheckCircle },
-  { action: 'Bater 10k Views', xp: 1000, icon: Icons.BarChart3 },
 ];
 
 // --- TIPOS ---
 interface UserData {
+  uid?: string;
   name: string;
   pixKey: string;
   email: string;
   xp: number;
+  saldo: number;
   joinedCampaigns?: string[];
 }
 
@@ -45,14 +48,12 @@ interface Campaign {
   title: string;
   creatorId: string;
   budget: number;
-  cpm: number;
   description: string;
   requiredHashtag: string;
   requiredMention: string;
   status: 'active' | 'full' | 'finished' | 'pending_payment';
-  startDate?: string;
-  endDate?: string;
-  createdAt?: any;
+  startDate: string;
+  endDate: string;
 }
 
 interface SubmittedVideo {
@@ -64,35 +65,30 @@ interface SubmittedVideo {
     campaignTitle: string;
     status: 'pending' | 'approved' | 'rejected';
     lastUpdated: any;
-    createdAt?: any;
+    createdAt: any;
+    userId: string;
 }
 
-// Adicionada a view 'campaign-details'
-type ViewType = 'overview' | 'campaigns' | 'campaign-details' | 'my-videos' | 'experience' | 'rankings' | 'settings';
+interface RankingItem {
+    userId: string;
+    name: string;
+    avatar: string;
+    totalViews: number;
+    videoCount: number;
+    isMe: boolean;
+    sharePercentage: number;
+    estimatedEarnings: number;
+}
 
-// --- HELPER MOCK RANKING ---
-const generateMockRanking = (type: 'total' | 'weekly' | 'daily', myName: string) => {
-  const users = [
-    { name: 'Pedro Cortes', views: 0, avatar: 'PC' },
-    { name: 'Maria Clips', views: 0, avatar: 'MC' },
-    { name: myName || 'Eu', views: 0, avatar: 'ME', isMe: true },
-    { name: 'João Viral', views: 0, avatar: 'JV' },
-    { name: 'Ana TikTok', views: 0, avatar: 'AT' },
-    { name: 'Carlos Edit', views: 0, avatar: 'CE' },
-    { name: 'Julia Reels', views: 0, avatar: 'JR' },
-  ];
-
-  const multiplier = type === 'total' ? 50000 : type === 'weekly' ? 10000 : 2000;
-  
-  const ranking = users.map(u => ({
-    ...u,
-    views: Math.floor(Math.random() * multiplier) + 500
-  })).sort((a, b) => b.views - a.views);
-
-  return ranking;
-};
+interface GlobalRankingItem {
+    name: string;
+    xp: number;
+    isMe: boolean;
+    rankLevel: string;
+}
 
 // --- FUNÇÕES AUXILIARES ---
+
 const formatCurrency = (value: number) => {
   if (isNaN(value)) return "R$ 0,00";
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
@@ -100,8 +96,41 @@ const formatCurrency = (value: number) => {
 
 const formatDate = (dateString?: string) => {
   if (!dateString) return 'Indefinido';
-  const [year, month, day] = dateString.split('-');
-  return `${day}/${month}/${year}`;
+  try {
+      const [year, month, day] = dateString.split('-');
+      return `${day}/${month}/${year}`;
+  } catch (e) {
+      return dateString;
+  }
+};
+
+const getDaysDiff = (startStr: string, endStr: string) => {
+    const start = new Date(startStr);
+    const end = new Date(endStr);
+    const diff = Math.abs(end.getTime() - start.getTime());
+    return Math.ceil(diff / (1000 * 3600 * 24)) || 1;
+};
+
+// Nova função para calcular dias restantes para UI
+const getDaysRemaining = (endStr: string) => {
+    const end = new Date(endStr);
+    const now = new Date();
+    // Zera as horas para comparar apenas dias
+    end.setHours(23, 59, 59, 999);
+    now.setHours(0, 0, 0, 0);
+    
+    const diffTime = end.getTime() - now.getTime();
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    return diffDays > 0 ? diffDays : 0;
+};
+
+const checkIsActive = (createdAt: any) => {
+    if (!createdAt) return true;
+    const createdDate = createdAt.toDate ? createdAt.toDate() : new Date(createdAt);
+    const now = new Date();
+    const diffTime = Math.abs(now.getTime() - createdDate.getTime());
+    const diffDays = diffTime / (1000 * 60 * 60 * 24);
+    return diffDays <= 7;
 };
 
 const detectPlatform = (url: string): 'youtube' | 'tiktok' | 'instagram' | 'unknown' => {
@@ -111,113 +140,202 @@ const detectPlatform = (url: string): 'youtube' | 'tiktok' | 'instagram' | 'unkn
     return 'unknown';
 };
 
-const fetchVideoStats = async (url: string, platform: string, currentViews = 0) => {
-    return new Promise<{ views: number }>((resolve) => {
-        setTimeout(() => {
-            const newViews = currentViews + Math.floor(Math.random() * 500) + 50; 
-            resolve({ views: newViews });
-        }, 1500);
-    });
+const CircularProgress = ({ value, max, color, size = 150 }: { value: number, max: number, color: string, size?: number }) => {
+    const radius = 60;
+    const circumference = 2 * Math.PI * radius;
+    const percent = Math.min(Math.max(value / max, 0), 1);
+    const offset = circumference - percent * circumference;
+    
+    return (
+      <div style={{ position: 'relative', width: size, height: size, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <svg width={size} height={size} viewBox="0 0 140 140" style={{ transform: 'rotate(-90deg)' }}>
+          <circle cx="70" cy="70" r={radius} stroke="var(--border)" strokeWidth="10" fill="none" />
+          <circle cx="70" cy="70" r={radius} stroke={color} strokeWidth="10" fill="none" strokeDasharray={circumference} strokeDashoffset={offset} strokeLinecap="round" style={{ transition: 'stroke-dashoffset 0.5s ease' }} />
+        </svg>
+        <div style={{ position: 'absolute', textAlign: 'center', color: 'var(--text-main)' }}>
+            <div style={{ fontSize: '1.5rem', fontWeight: 'bold' }}>{Math.round(percent * 100)}%</div>
+            <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>XP para upar</div>
+        </div>
+      </div>
+    );
 };
 
-const StatCard = ({ label, value, icon: Icon, color }: any) => (
-  <div style={{ background: 'var(--bg-card)', padding: '20px', borderRadius: '12px', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: '15px', boxShadow: 'var(--shadow-card)' }}>
-    <div style={{ width: '45px', height: '45px', borderRadius: '10px', background: `${color}20`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: color }}><Icon size={24} /></div>
-    <div><div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{label}</div><div style={{ fontSize: '1.5rem', fontWeight: '700', color: 'var(--text-main)' }}>{value}</div></div>
-  </div>
-);
+const CircularRemaining = ({ startStr, endStr, size = 130 }: { startStr: string, endStr: string, size?: number }) => {
+  // 1. Processamento das Datas
+  const startDate = new Date(startStr);
+  const endDate = new Date(endStr);
+  const now = new Date();
 
-const CircularProgress = ({ value, max, color, size = 200, strokeWidth = 15 }: { value: number, max: number, color: string, size?: number, strokeWidth?: number }) => {
-  const radius = (size - strokeWidth) / 2;
-  const circumference = radius * 2 * Math.PI;
-  const percent = max > 0 ? Math.min(Math.max(value / max, 0), 1) : 1;
-  const dashOffset = circumference - percent * circumference;
+  // Zerar horas para cálculo preciso de dias corridos
+  startDate.setHours(0, 0, 0, 0);
+  endDate.setHours(23, 59, 59, 999);
+  now.setHours(0, 0, 0, 0);
+
+  const totalTime = Math.max(0, endDate.getTime() - startDate.getTime());
+  const remainingTime = Math.max(0, endDate.getTime() - now.getTime());
+
+  // 2. Cálculos Matemáticos
+  // Evita divisão por zero com || 1
+  const totalDays = Math.ceil(totalTime / (1000 * 60 * 60 * 24)) || 1; 
+  const remainingDays = Math.ceil(remainingTime / (1000 * 60 * 60 * 24));
+  
+  // Percentual para encher o círculo (Quanto mais tempo sobra, mais cheio)
+  const percent = Math.min(Math.max(remainingDays / totalDays, 0), 1);
+
+  // 3. Lógica de Cores (Semáforo)
+  let color = '#ef4444'; // Vermelho (padrão/urgente <= 7)
+  if (remainingDays > 14) {
+      color = '#10b981'; // Verde (tranquilo)
+  } else if (remainingDays > 7) {
+      color = '#fbbf24'; // Amarelo (atenção)
+  }
+
+  // 4. Configuração do SVG
+  const radius = 60;
+  const circumference = 2 * Math.PI * radius;
+  const offset = circumference - percent * circumference;
+
   return (
-    <div style={{ position: 'relative', width: size, height: size, margin: '0 auto' }}>
-      <svg width={size} height={size} style={{ transform: 'rotate(-90deg)' }}>
-        <circle cx={size / 2} cy={size / 2} r={radius} fill="none" stroke="var(--border)" strokeWidth={strokeWidth} />
-        <circle cx={size / 2} cy={size / 2} r={radius} fill="none" stroke={color} strokeWidth={strokeWidth} strokeDasharray={circumference} strokeDashoffset={dashOffset} strokeLinecap="round" style={{ transition: 'stroke-dashoffset 1s ease-out' }} />
+    <div style={{ position: 'relative', width: size, height: size, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      {/* Círculo de Fundo (Cinza/Borda) */}
+      <svg width={size} height={size} viewBox="0 0 140 140" style={{ transform: 'rotate(-90deg)' }}>
+        <circle cx="70" cy="70" r={radius} stroke="var(--border)" strokeWidth="8" fill="none" opacity="0.5" />
+        {/* Círculo de Progresso Colorido */}
+        <circle 
+          cx="70" cy="70" r={radius} 
+          stroke={color} 
+          strokeWidth="8" 
+          fill="none" 
+          strokeDasharray={circumference} 
+          strokeDashoffset={offset} 
+          strokeLinecap="round" 
+          style={{ transition: 'stroke-dashoffset 1s ease, stroke 0.5s ease' }} 
+        />
       </svg>
-      <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', textAlign: 'center' }}>
-        <div style={{ fontSize: '2rem', fontWeight: 'bold', color: 'var(--text-main)' }}>{Math.round(percent * 100)}%</div>
-        <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>para o próximo elo</div>
+      
+      {/* Texto Central */}
+      <div style={{ position: 'absolute', textAlign: 'center', color: 'var(--text-main)', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+          <div style={{ fontSize: '1.4rem', fontWeight: '800', lineHeight: 1.1 }}>
+              {remainingDays}/{totalDays}
+          </div>
+          <div style={{ fontSize: '0.75rem', fontWeight: '600', color: color, marginTop: 2 }}>
+              dias restantes
+          </div>
       </div>
     </div>
   );
 };
 
+const StatCard = ({ label, value, subtext, icon: Icon, color }: any) => (
+  <div style={{ background: 'var(--bg-card)', padding: '20px', borderRadius: '12px', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: '15px', boxShadow: 'var(--shadow-card)' }}>
+    <div style={{ width: '45px', height: '45px', borderRadius: '10px', background: `${color}20`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: color }}><Icon size={24} /></div>
+    <div>
+        <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{label}</div>
+        <div style={{ fontSize: '1.5rem', fontWeight: '700', color: 'var(--text-main)' }}>{value}</div>
+        {subtext && <div style={{ fontSize: '0.75rem', color: color }}>{subtext}</div>}
+    </div>
+  </div>
+);
+
+type ViewType = 'overview' | 'campaigns' | 'campaign-details' | 'my-videos' | 'experience' | 'settings';
+
 export default function ClipperDashboard() {
   const navigate = useNavigate();
   const [view, setView] = useState<ViewType>('overview');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [userData, setUserData] = useState<UserData>({ name: '', pixKey: '', email: '', xp: 0, joinedCampaigns: [] });
+  const [userData, setUserData] = useState<UserData>({ name: '', pixKey: '', email: '', xp: 0, saldo: 0, joinedCampaigns: [] });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [theme, setTheme] = useState<'dark' | 'light'>('light');
 
+  
+  // Dados Reais
   const [availableCampaigns, setAvailableCampaigns] = useState<Campaign[]>([]);
   const [myVideos, setMyVideos] = useState<SubmittedVideo[]>([]);
+  const [globalRanking, setGlobalRanking] = useState<GlobalRankingItem[]>([]);
   
+  // Envio
   const [videoUrl, setVideoUrl] = useState('');
   const [selectedCampaignId, setSelectedCampaignId] = useState('');
   const [submittingVideo, setSubmittingVideo] = useState(false);
-  const [refreshingId, setRefreshingId] = useState<string | null>(null);
-
-  // Estados da PÁGINA DE DETALHES
+  
+  // Detalhes & Ranking da Campanha
   const [selectedCampaignForDetails, setSelectedCampaignForDetails] = useState<Campaign | null>(null);
-  const [rankingTab, setRankingTab] = useState<'total' | 'weekly' | 'daily'>('daily');
+  const [rankingList, setRankingList] = useState<RankingItem[]>([]);
+  const [campaignEconomics, setCampaignEconomics] = useState({ weeklyPot: 0, totalViews: 0, myEarnings: 0 });
 
+  // Tema
+  const [theme, setTheme] = useState<'dark' | 'light'>('light');
+
+  // Gamificação
   const getCurrentRank = () => {
     const xp = userData.xp || 0;
     return RANKS.find(r => xp >= r.min && xp <= r.max) || RANKS[RANKS.length - 1];
   };
   const currentRank = getCurrentRank();
   const nextRank = RANKS[RANKS.findIndex(r => r.name === currentRank.name) + 1] || null;
-  const progress = nextRank ? { current: (userData.xp || 0) - currentRank.min, total: nextRank.min - currentRank.min } : 100;
+  const progress = nextRank ? { current: (userData.xp || 0) - currentRank.min, total: nextRank.min - currentRank.min } : { current: 100, total: 100 };
+
+  const handleSaveSettings = async (e: React.FormEvent) => {
+    e.preventDefault(); setSaving(true);
+    if (!auth.currentUser) return;
+    try { await updateDoc(doc(db, "users", auth.currentUser.uid), { name: userData.name, pixKey: userData.pixKey }); alert("Salvo!"); } 
+    catch (error) { console.error(error); alert("Erro."); } finally { setSaving(false); }
+  };
 
   useEffect(() => {
     const fetchAllData = async () => {
       if (!auth.currentUser) return;
+      
       try {
+        // Busca Usuário
         const userDoc = await getDoc(doc(db, "users", auth.currentUser.uid));
         if (userDoc.exists()) {
-          const data = userDoc.data();
-          setUserData({ ...data, xp: data.xp || 0, joinedCampaigns: data.joinedCampaigns || [] } as UserData);
+          setUserData({ ...userDoc.data(), uid: userDoc.id } as UserData);
         }
 
+        // Busca Campanhas Ativas
         const q = query(collection(db, "campaigns"), where("status", "==", "active"));
         const querySnapshot = await getDocs(q);
         const fetchedCampaigns: Campaign[] = [];
         querySnapshot.forEach((doc) => {
-          const data = doc.data();
-          fetchedCampaigns.push({
-            id: doc.id,
-            title: data.title,
-            creatorId: data.creatorId,
-            budget: Number(data.budget),
-            cpm: Number(data.cpm),
-            description: data.description || "",
-            requiredHashtag: data.requiredHashtag || "",
-            requiredMention: data.requiredMention || "",
-            startDate: data.startDate,
-            endDate: data.endDate,
-            status: data.status,
-            createdAt: data.createdAt
-          });
+          fetchedCampaigns.push({ id: doc.id, ...doc.data() } as Campaign);
         });
         setAvailableCampaigns(fetchedCampaigns);
 
-        const videosQuery = query(collection(db, "videos"), where("userId", "==", auth.currentUser.uid));
-        const videosSnap = await getDocs(videosQuery);
-        const videosList = videosSnap.docs.map(d => ({ id: d.id, ...d.data() } as SubmittedVideo));
-        videosList.sort((a, b) => (b.lastUpdated?.seconds || 0) - (a.lastUpdated?.seconds || 0));
+        // Busca Meus Vídeos
+        const vQuery = query(collection(db, "videos"), where("userId", "==", auth.currentUser.uid));
+        const vSnap = await getDocs(vQuery);
+        const videosList = vSnap.docs.map(d => ({ id: d.id, ...d.data() } as SubmittedVideo));
+        videosList.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
         setMyVideos(videosList);
-      } catch (error) { console.error(error); } finally { setLoading(false); }
+
+        // Busca Ranking Global de XP (Top 10)
+        const rankQuery = query(collection(db, "users"), orderBy("xp", "desc"), limit(10));
+        const rankSnap = await getDocs(rankQuery);
+        const globalRank: GlobalRankingItem[] = [];
+        rankSnap.forEach(doc => {
+            const d = doc.data();
+            const xp = d.xp || 0;
+            const rLevel = RANKS.find(r => xp >= r.min && xp <= r.max)?.name || 'Iniciante';
+            globalRank.push({
+                name: d.name,
+                xp: xp,
+                isMe: doc.id === auth.currentUser?.uid,
+                rankLevel: rLevel
+            });
+        });
+        setGlobalRanking(globalRank);
+
+      } catch (error) { 
+          console.error(error); 
+      } finally { 
+          setLoading(false); 
+      }
     };
+
     fetchAllData();
     const savedTheme = localStorage.getItem('clipay-theme') as 'dark' | 'light' | null;
     if (savedTheme) { setTheme(savedTheme); document.documentElement.setAttribute('data-theme', savedTheme); }
-    else { document.documentElement.setAttribute('data-theme', 'light'); }
   }, []);
 
   const toggleTheme = () => {
@@ -236,25 +354,109 @@ export default function ClipperDashboard() {
     try {
       const userRef = doc(db, "users", auth.currentUser.uid);
       await updateDoc(userRef, { joinedCampaigns: arrayUnion(campaignId), xp: (userData.xp || 0) + 50 });
-      setUserData(prev => ({ ...prev, joinedCampaigns: [...(prev.joinedCampaigns || []), campaignId], xp: prev.xp + 50 }));
-      alert("Você entrou na campanha com sucesso!");
-    } catch (error) { console.error(error); alert("Erro ao entrar na campanha."); }
+      setUserData(prev => ({ ...prev, xp: prev.xp + 50, joinedCampaigns: [...(prev.joinedCampaigns || []), campaignId] }));
+      alert("Sucesso! Você entrou na campanha.");
+    } catch (error) { console.error(error); alert("Erro ao entrar."); }
   };
 
-  // NAVEGAÇÃO PARA DETALHES DA CAMPANHA (SUBSTITUI MODAL)
-  const openCampaignDetails = (campaign: Campaign) => {
-    setSelectedCampaignForDetails(campaign);
-    setView('campaign-details');
-    // Scroll para o topo ao mudar de view
-    window.scrollTo(0, 0);
+  // --- LÓGICA DE RANKING REAL & POTE ---
+  const openCampaignDetails = async (campaign: Campaign) => {
+      setLoading(true);
+      setSelectedCampaignForDetails(campaign);
+      
+      try {
+        // 1. Calcular o Pote Semanal (Orçamento / Dias * 7)
+        const totalDays = getDaysDiff(campaign.startDate, campaign.endDate);
+        const dailyBudget = campaign.budget / totalDays;
+        const weeklyPot = dailyBudget * 7;
+
+        // 2. Buscar TODOS os vídeos aprovados da campanha
+        const vQuery = query(collection(db, "videos"), where("campaignId", "==", campaign.id), where("status", "==", "approved"));
+        const vSnap = await getDocs(vQuery);
+
+        // 3. Somar visualizações por usuário
+        const userStatsMap = new Map<string, { views: number, count: number }>();
+        let grandTotalViews = 0;
+
+        vSnap.forEach(doc => {
+            const data = doc.data();
+            const uid = data.userId;
+            const views = Number(data.views) || 0;
+            
+            grandTotalViews += views;
+
+            if (!userStatsMap.has(uid)) {
+                userStatsMap.set(uid, { views: 0, count: 0 });
+            }
+            const stats = userStatsMap.get(uid)!;
+            stats.views += views;
+            stats.count += 1;
+        });
+
+        // 4. Buscar nomes reais dos usuários e montar lista
+        const rankingTemp: RankingItem[] = [];
+        const userIds = Array.from(userStatsMap.keys());
+        
+        // Usamos Promise.all para buscar os nomes em paralelo e remover dados mockados
+        await Promise.all(userIds.map(async (uid) => {
+            let name = "Usuário Clipay";
+            
+            if (uid === auth.currentUser?.uid) {
+                name = userData.name;
+            } else {
+                try {
+                    const uDoc = await getDoc(doc(db, "users", uid));
+                    if (uDoc.exists()) name = uDoc.data().name;
+                } catch (e) {
+                    console.error("Erro ao buscar nome", uid);
+                }
+            }
+
+            const stats = userStatsMap.get(uid)!;
+            // A porcentagem é calculada sobre o TOTAL de views da campanha
+            const share = grandTotalViews > 0 ? (stats.views / grandTotalViews) : 0;
+            const earnings = share * weeklyPot; // Quanto ele ganharia do pote semanal
+
+            rankingTemp.push({
+                userId: uid,
+                name: name,
+                avatar: name.charAt(0).toUpperCase(),
+                totalViews: stats.views,
+                videoCount: stats.count,
+                isMe: uid === auth.currentUser?.uid,
+                sharePercentage: share * 100, // Porcentagem (0-100)
+                estimatedEarnings: earnings
+            });
+        }));
+
+        // Ordenar do maior para o menor
+        rankingTemp.sort((a, b) => b.totalViews - a.totalViews);
+        setRankingList(rankingTemp);
+        
+        // Atualizar meus dados econômicos
+        const myRank = rankingTemp.find(r => r.isMe);
+        setCampaignEconomics({
+            weeklyPot: weeklyPot,
+            totalViews: grandTotalViews,
+            myEarnings: myRank ? myRank.estimatedEarnings : 0
+        });
+
+        setView('campaign-details');
+        window.scrollTo(0,0);
+
+      } catch (error) { 
+          console.error("Erro ao gerar ranking", error); 
+          alert("Erro ao carregar detalhes.");
+      } finally { 
+          setLoading(false); 
+      }
   };
 
   const handleSubmitVideo = async (e: React.FormEvent) => {
       e.preventDefault();
       if (!auth.currentUser) return;
       const platform = detectPlatform(videoUrl);
-      if (platform === 'unknown') { alert("Link inválido. Use YouTube Shorts, TikTok ou Instagram."); return; }
-      if (!selectedCampaignId) { alert("Selecione uma campanha."); return; }
+      if (platform === 'unknown') { alert("Link inválido."); return; }
       
       const isDuplicate = myVideos.some(v => v.url === videoUrl);
       if (isDuplicate) { alert("Link já enviado."); return; }
@@ -263,33 +465,27 @@ export default function ClipperDashboard() {
       try {
           const campaign = availableCampaigns.find(c => c.id === selectedCampaignId);
           if (!campaign) throw new Error("Campanha não encontrada");
-          const stats = await fetchVideoStats(videoUrl, platform, 0);
+
           const newVideo = {
-            userId: auth.currentUser.uid, url: videoUrl, platform, views: stats.views,
+            userId: auth.currentUser.uid, url: videoUrl, platform, views: 0, 
             campaignId: selectedCampaignId, campaignTitle: campaign.title,
             requiredHashtag: campaign.requiredHashtag, requiredMention: campaign.requiredMention,
             status: 'pending' as const, lastUpdated: serverTimestamp(), createdAt: serverTimestamp()
           };
+          
           const docRef = await addDoc(collection(db, "videos"), newVideo);
-          setMyVideos(prev => [{ id: docRef.id, ...newVideo, lastUpdated: new Date() } as SubmittedVideo, ...prev]);
+          // @ts-ignore
+          setMyVideos(prev => [{ id: docRef.id, ...newVideo, createdAt: new Date() }, ...prev]);
+          
           const userRef = doc(db, "users", auth.currentUser.uid);
           await updateDoc(userRef, { xp: (userData.xp || 0) + 100 });
-          setUserData(prev => ({ ...prev, xp: prev.xp + 100 }));
-          setVideoUrl(''); alert(`Vídeo enviado com sucesso!`);
+          setUserData(prev => ({ ...prev, xp: (prev.xp || 0) + 100 }));
+          
+          setVideoUrl(''); alert(`Vídeo enviado! +100 XP`);
       } catch (error) { console.error(error); alert("Erro ao enviar vídeo."); } finally { setSubmittingVideo(false); }
   };
 
-  const handleSaveSettings = async (e: React.FormEvent) => {
-    e.preventDefault(); setSaving(true);
-    if (!auth.currentUser) return;
-    try { await updateDoc(doc(db, "users", auth.currentUser.uid), { name: userData.name, pixKey: userData.pixKey }); alert("Salvo!"); } 
-    catch (error) { console.error(error); alert("Erro."); } finally { setSaving(false); }
-  };
-
   const changeView = (newView: ViewType) => { setView(newView); setIsMobileMenuOpen(false); };
-  const getSelectedCampaignDetails = () => availableCampaigns.find(c => c.id === selectedCampaignId);
-
-  // Filtros de Campanhas
   const myCampaignsList = availableCampaigns.filter(c => userData.joinedCampaigns?.includes(c.id));
   const availableList = availableCampaigns.filter(c => !userData.joinedCampaigns?.includes(c.id));
 
@@ -298,60 +494,19 @@ export default function ClipperDashboard() {
   return (
     <div className="dashboard-layout">
       <style>{`
-        [data-theme="light"] .sidebar-btn:hover { color: var(--primary) !important; background: var(--bg-card-hover); }
-        .dash-input-wrapper { display: flex; alignItems: center; background: var(--bg-card-hover); border: 1px solid var(--border); borderRadius: 8px; padding: 0 12px; transition: var(--transition); }
-        .dash-input-wrapper:focus-within { border-color: var(--primary); boxShadow: 0 0 0 2px rgba(59, 130, 246, 0.2); }
-        .dash-input { background: transparent; border: none; color: var(--text-main); width: 100%; padding: 12px 0; outline: none; }
-        
-        /* GRID CUSTOMIZADO - RESOLVE O PROBLEMA DE CARD GIGANTE */
-        .campaign-grid {
-            display: grid;
-            /* auto-fill: preenche o máximo de colunas que der, se sobrar espaço no final da linha, deixa vazio (não estica) */
-            grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-            gap: 20px;
-        }
-
-        .campaign-card { background: var(--bg-card); border: 1px solid var(--border); borderRadius: 12px; padding: 25px; transition: all 0.3s ease; display: flex; height: 100%; min-height: 280px; position: relative; }
-        .campaign-card:hover { transform: translateY(-5px); border-color: var(--primary); box-shadow: var(--shadow-card); }
-        
-        .campaign-card.clickable { cursor: pointer; }
-        .campaign-card.clickable:hover { background: var(--bg-card-hover); }
-
-        .video-platform-icon { display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 50%; color: white; }
-        .youtube-bg { background: #FF0000; }
-        .tiktok-bg { background: #000000; }
-        .instagram-bg { background: linear-gradient(45deg, #f09433 0%, #e6683c 25%, #dc2743 50%, #cc2366 75%, #bc1888 100%); }
-        .requirement-box { background: rgba(251, 191, 36, 0.1); border: 1px solid rgba(251, 191, 36, 0.3); color: #d97706; padding: 15px; border-radius: 8px; margin-top: 15px; font-size: 0.9rem; }
-        [data-theme="dark"] .requirement-box { color: #fbbf24; }
-        @media (max-width: 768px) { .desktop-theme-toggle { display: none !important; } }
-
-        /* RANKING NA PÁGINA DE DETALHES */
-        .rank-tab-container { display: flex; gap: 10px; margin-bottom: 20px; border-bottom: 1px solid var(--border); padding-bottom: 10px; }
-        .rank-tab { background: none; border: none; padding: 10px 20px; cursor: pointer; color: var(--text-muted); font-weight: 600; border-radius: 8px; transition: all 0.2s; font-size: 1rem; }
-        .rank-tab:hover { background: var(--bg-card-hover); color: var(--text-main); }
-        .rank-tab.active { background: var(--primary); color: white; }
-        
-        .ranking-list { display: flex; flexDirection: column; gap: 10px; }
-        .ranking-item { display: flex; alignItems: center; justify-content: space-between; padding: 20px; background: var(--bg-card-hover); border-radius: 8px; border: 1px solid var(--border); transition: transform 0.2s; }
-        .ranking-item:hover { transform: translateX(5px); border-color: var(--primary); }
-        .ranking-pos { width: 40px; font-weight: bold; color: var(--text-muted); font-size: 1.1rem; }
-        .ranking-name { flex: 1; font-weight: 600; display: flex; align-items: center; gap: 15px; font-size: 1.05rem; }
-        .ranking-score { font-weight: bold; color: var(--success); font-size: 1.1rem; }
-        .medal { margin-right: 5px; font-size: 1.2rem; }
+        .campaign-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px; }
+        .campaign-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 20px; transition: all 0.3s ease; display: flex; flex-direction: column; height: 100%; }
+        .campaign-card:hover { border-color: var(--primary); transform: translateY(-3px); }
+        .ranking-item { display: flex; align-items: center; padding: 15px; border-bottom: 1px solid var(--border); gap: 15px; }
+        .ranking-pos { font-size: 1.2rem; font-weight: bold; min-width: 30px; }
+        .video-status-badge { font-size: 0.75rem; padding: 3px 8px; border-radius: 4px; font-weight: 600; text-transform: uppercase; }
+        .status-active { background: rgba(16, 185, 129, 0.1); color: #10b981; }
+        .status-expired { background: rgba(239, 68, 68, 0.1); color: #ef4444; }
+        .theme-toggle-mini { width: 40px; height: 24px; background: var(--bg-card-hover); border-radius: 20px; position: relative; cursor: pointer; border: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; padding: 2px; }
+        .theme-toggle-dot { width: 18px; height: 18px; background: var(--primary); border-radius: 50%; position: absolute; top: 2px; transition: left 0.3s; }
       `}</style>
 
-      {/* HEADER MOBILE */}
-      <div className="mobile-header">
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontWeight: 'bold', color: 'var(--primary)' }}>
-          <Icons.Play fill="var(--primary)" size={24} /> Clipay
-        </div>
-        <button onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)} style={{ background: 'none', border: 'none', color: 'var(--text-main)' }}>
-            {isMobileMenuOpen ? <Icons.X size={28} /> : <Icons.Menu size={28} />}
-        </button>
-      </div>
-
-      {isMobileMenuOpen && <div className="overlay" onClick={() => setIsMobileMenuOpen(false)}></div>}
-
+      {/* SIDEBAR */}
       <aside className={`sidebar ${isMobileMenuOpen ? 'open' : ''}`}>
         <div style={{ padding: '25px 20px', display: 'flex', alignItems: 'center', gap: '10px', fontSize: '1.2rem', fontWeight: 'bold', color: 'var(--primary)' }}>
           <Icons.Play fill="var(--primary)" size={28} /> Clipper
@@ -361,10 +516,11 @@ export default function ClipperDashboard() {
           <button onClick={() => changeView('campaigns')} className={`sidebar-btn ${view === 'campaigns' || view === 'campaign-details' ? 'active' : ''}`}><Icons.Briefcase size={20} /> Campanhas</button>
           <button onClick={() => changeView('my-videos')} className={`sidebar-btn ${view === 'my-videos' ? 'active' : ''}`}><Icons.Play size={20} /> Meus Vídeos</button>
           <button onClick={() => changeView('experience')} className={`sidebar-btn ${view === 'experience' ? 'active' : ''}`}><Icons.Target size={20} /> Nível & XP</button>
-          <button onClick={() => changeView('settings')} className={`sidebar-btn ${view === 'settings' ? 'active' : ''}`}><Icons.User size={20} /> Configurações</button>
+          <button onClick={() => changeView('settings')} className={`sidebar-btn ${view === 'settings' ? 'active' : ''}`}><Icons.User size={20} /> Dados & Pix</button>
         </nav>
-        <div className="sidebar-footer" style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
-          <button onClick={handleLogout} className="sidebar-btn" style={{ color: 'var(--danger)', width: 'auto', flex: 1 }}><Icons.LogOut size={20} /> Sair</button>
+        <div className="sidebar-footer" style={{display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingRight: 20}}>
+          <button onClick={handleLogout} className="sidebar-btn" style={{ color: 'var(--danger)', width: 'auto' }}><Icons.LogOut size={20} /> Sair</button>
+          
           <div onClick={toggleTheme} style={{ width: '60px', height: '32px', padding: '4px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', background: 'var(--bg-card-hover)', border: '1px solid var(--border)', borderRadius: '30px', position: 'relative', marginLeft: '10px' }}>
             <div className="theme-toggle-bg" style={{ position: 'absolute', left: '4px', width: '24px', height: '24px', borderRadius: '50%', background: 'var(--primary)', transition: 'transform 0.3s ease', transform: theme === 'dark' ? 'translateX(28px)' : 'translateX(0)' }}></div>
             <div style={{ zIndex: 2, width: '24px', display: 'flex', justifyContent: 'center' }}><Icons.Sun size={14} color={theme === 'light' ? 'white' : 'var(--text-muted)'} /></div>
@@ -374,100 +530,58 @@ export default function ClipperDashboard() {
       </aside>
 
       <main className="main-content">
-        <div className="desktop-theme-toggle" onClick={toggleTheme} style={{ position: 'absolute', top: '30px', right: '40px', width: '74px', height: '36px', padding: '4px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '30px', boxShadow: 'var(--shadow-card)', zIndex: 10 }}>
-            <div className="theme-toggle-bg" style={{ position: 'absolute', left: '4px', width: '28px', height: '28px', borderRadius: '50%', background: 'var(--primary)', transition: 'transform 0.3s ease', transform: theme === 'dark' ? 'translateX(38px)' : 'translateX(0)' }}></div>
-            <div style={{ zIndex: 2, width: '28px', display: 'flex', justifyContent: 'center' }}><Icons.Sun size={18} color={theme === 'light' ? 'white' : 'var(--text-muted)'} /></div>
-            <div style={{ zIndex: 2, width: '28px', display: 'flex', justifyContent: 'center' }}><Icons.Moon size={18} color={theme === 'dark' ? 'white' : 'var(--text-muted)'} /></div>
+      <div className="mobile-header">
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontWeight: 'bold', color: 'var(--primary)' }}>
+          <Icons.Play fill="var(--primary)" size={24} /> Clipay
         </div>
+        <button onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)} style={{ background: 'none', border: 'none', color: 'var(--text-main)' }}>
+            {isMobileMenuOpen ? <Icons.X size={28} /> : <Icons.Menu size={28} />}
+        </button>
+      </div>
 
         {view === 'overview' && (
           <div className="fade-in-up">
-            <div style={{ display: 'flex', alignItems: 'center', gap: '15px', marginBottom: '30px' }}>
-                <div>
-                    <h1 style={{ fontSize: '1.8rem', marginBottom: '5px' }}>Olá, {userData.name || 'Clipador'}</h1>
-                    <p style={{ color: 'var(--text-muted)' }}>Veja seus resultados e ganhos.</p>
-                </div>
-                <div style={{ padding: '8px 16px', borderRadius: '20px', background: `linear-gradient(135deg, ${currentRank.color}20, transparent)`, border: `1px solid ${currentRank.color}`, color: currentRank.color, fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <Icons.Star size={16} color={currentRank.color} /> {currentRank.name}
-                </div>
+            <h1 style={{marginBottom: 20}}>Olá, {userData.name}</h1>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '20px' }}>
+              <StatCard label="Saldo Estimado" value={formatCurrency(userData.saldo)} icon={Icons.Wallet} color="var(--success)" />
+              <StatCard label="Nível Atual" value={currentRank.name} icon={Icons.Target} color={currentRank.color} />
+              <StatCard label="Meus Vídeos" value={myVideos.length} icon={Icons.Play} color="#8b5cf6" />
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '20px', marginBottom: '40px' }}>
-              <StatCard label="Saldo Disponível" value="R$ 0,00" icon={Icons.Wallet} color="var(--success)" />
-              <StatCard label="XP Atual" value={userData.xp.toString()} icon={Icons.Target} color={currentRank.color} />
-              <StatCard label="Campanhas Participando" value={(userData.joinedCampaigns?.length || 0).toString()} icon={Icons.Briefcase} color="var(--primary)" />
+            <div style={{marginTop: 30, padding: 15, background: 'rgba(59, 130, 246, 0.1)', borderRadius: 8, border: '1px solid rgba(59, 130, 246, 0.3)', color: 'var(--primary)'}}>
+                <div style={{fontWeight: 'bold', marginBottom: 5}}>Como eu ganho dinheiro? (Pote Semanal)</div>
+                <div style={{fontSize: '0.9rem'}}>O pagamento não é mais fixo por view. Agora nós somamos todas as views da semana e calculamos qual porcentagem você contribuiu. Se você fez 10% das views totais, você leva 10% do Pote da Semana!</div>
             </div>
           </div>
         )}
 
         {view === 'campaigns' && (
           <div className="fade-in-up">
-            {/* SEÇÃO 1: MINHAS CAMPANHAS */}
-            <h2 style={{ fontSize: '1.4rem', marginBottom: '15px', display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <Icons.CheckCircle size={24} color="var(--success)" /> Minhas Campanhas (Clique para ver)
-            </h2>
-            
-            {myCampaignsList.length === 0 ? (
-                <p style={{color: 'var(--text-muted)', marginBottom: '40px'}}>Você ainda não entrou em nenhuma campanha.</p>
-            ) : (
-                <div className="campaign-grid" style={{ marginBottom: '50px' }}>
-                    {myCampaignsList.map(camp => (
-                        <div key={camp.id} className="campaign-card clickable" onClick={() => openCampaignDetails(camp)}>
-                            <div>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '15px' }}>
-                                    <div style={{ fontWeight: 'bold', fontSize: '1.1rem', lineHeight: '1.3' }}>{camp.title}</div>
-                                    <span style={{ fontSize: '0.75rem', color: 'var(--success)', background: 'rgba(16, 185, 129, 0.1)', padding: '4px 8px', borderRadius: '4px' }}>Participando</span>
-                                </div>
-                                <div style={{fontSize: '0.9rem', color: 'var(--text-muted)', marginBottom: '10px'}}>
-                                    {camp.description.length > 80 ? camp.description.substring(0, 80) + '...' : camp.description}
-                                </div>
-                                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '15px' }}>
-                                    <span style={{ fontSize: '0.75rem', background: 'var(--bg-card-hover)', border: '1px solid var(--border)', padding: '4px 8px', borderRadius: '12px', color: 'var(--primary)' }}>#{camp.requiredHashtag}</span>
-                                    {camp.endDate && <span style={{ fontSize: '0.75rem', background: 'var(--bg-card-hover)', border: '1px solid var(--border)', padding: '4px 8px', borderRadius: '12px' }}><Icons.Clock size={10} /> Fim: {formatDate(camp.endDate)}</span>}
-                                </div>
-                            </div>
-                            <div className="btn btn-primary" style={{ marginTop: 'auto' }}>
-                                Ver Ranking e Detalhes →
-                            </div>
-                        </div>
-                    ))}
-                </div>
-            )}
-
-            {/* SEÇÃO 2: CAMPANHAS DISPONÍVEIS */}
-            <h2 style={{ fontSize: '1.4rem', marginBottom: '15px', display: 'flex', alignItems: 'center', gap: '10px', paddingTop: '20px', borderTop: '1px solid var(--border)' }}>
-                <Icons.Briefcase size={24} color="var(--primary)" /> Disponíveis para Entrar
-            </h2>
-
-            {availableList.length === 0 ? (
-                <p style={{color: 'var(--text-muted)'}}>Não há novas campanhas no momento.</p>
-            ) : (
+            <h2 style={{marginBottom: 20}}>Minhas Campanhas</h2>
+            {myCampaignsList.length === 0 ? <p style={{color: 'var(--text-muted)'}}>Nenhuma. Veja as disponíveis abaixo.</p> : (
                 <div className="campaign-grid">
-                    {availableList.map(camp => (
-                        <div key={camp.id} className="campaign-card">
-                            <div>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '15px' }}>
-                                    <div style={{ fontWeight: 'bold', fontSize: '1.1rem', lineHeight: '1.3' }}>{camp.title}</div>
-                                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', background: 'var(--bg-card-hover)', padding: '4px 8px', borderRadius: '4px' }}>Disponível</span>
-                                </div>
-                                <div style={{ marginBottom: '15px', fontSize: '0.9rem', color: 'var(--text-muted)', display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{camp.description}</div>
-                                <div style={{ marginBottom: '20px' }}>
-                                    <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Orçamento Total / CPM</div>
-                                    <div style={{ display: 'flex', gap: '8px', alignItems: 'baseline', flexWrap: 'wrap' }}>
-                                        <div style={{ fontSize: '1.2rem', fontWeight: 'bold', color: 'var(--success)' }}>{formatCurrency(camp.budget)}</div>
-                                        <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>({formatCurrency(camp.cpm)}/1k views)</div>
-                                    </div>
-                                </div>
-                                {camp.endDate && <div style={{fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '15px'}}><Icons.Clock size={12} /> Prazo: {formatDate(camp.startDate)} até {formatDate(camp.endDate)}</div>}
-                            </div>
-                            <button className="btn btn-primary" style={{ width: '100%', marginTop: 'auto' }} onClick={(e) => handleJoinCampaign(camp.id, e)}>Entrar na Campanha</button>
+                    {myCampaignsList.map(camp => (
+                        <div key={camp.id} className="campaign-card" style={{cursor: 'pointer', borderColor: 'var(--primary)'}} onClick={() => openCampaignDetails(camp)}>
+                            <h3>{camp.title}</h3>
+                            <p style={{fontSize: '0.9rem', color: 'var(--text-muted)', margin: '10px 0'}}>{camp.description.substring(0, 80)}...</p>
+                            <button className="btn btn-primary" style={{width: '100%', marginTop: 'auto'}}>Ver Ranking & Pote</button>
                         </div>
                     ))}
                 </div>
             )}
+            <h2 style={{marginTop: 40, marginBottom: 20}}>Disponíveis</h2>
+            <div className="campaign-grid">
+                {availableList.map(camp => (
+                    <div key={camp.id} className="campaign-card">
+                        <h3>{camp.title}</h3>
+                        <p style={{color: 'var(--success)', fontWeight: 'bold'}}>{formatCurrency(camp.budget)} Total</p>
+                        <p style={{fontSize: '0.85rem', marginTop: 5}}>Prazo: {formatDate(camp.startDate)} até {formatDate(camp.endDate)}</p>
+                        <button className="btn btn-outline" style={{marginTop: 15}} onClick={(e) => handleJoinCampaign(camp.id, e)}>Participar</button>
+                    </div>
+                ))}
+            </div>
           </div>
         )}
 
-        {/* --- PÁGINA DE DETALHES DA CAMPANHA (NOVA) --- */}
         {view === 'campaign-details' && selectedCampaignForDetails && (
             <div className="fade-in-up">
                 <button 
@@ -476,178 +590,147 @@ export default function ClipperDashboard() {
                 >
                     <Icons.ArrowRight size={16} style={{transform: 'rotate(180deg)'}} /> Voltar para Campanhas
                 </button>
+                
+                {/* --- HEADER DA CAMPANHA (COM CÍRCULO DINÂMICO) --- */}
+                <div className="campaign-header" style={{background: 'var(--bg-card)', padding: 25, borderRadius: 12, border: '1px solid var(--border)', marginBottom: 30}}>
+                    <div style={{display: 'flex', justifyContent: 'center', alignItems: 'center', flexWrap: 'wrap', gap: 20, textAlign: 'center'}}>
+                        
+                        {/* Lado Esquerdo: Textos e Tags */}
+                        <div style={{flex: 1, minWidth: '250px'}}>
+                            <h1 style={{fontSize: '1.8rem', marginBottom: 10}}>{selectedCampaignForDetails.title}</h1>
+                            <p style={{color: 'var(--text-muted)', marginBottom: 15}}>{selectedCampaignForDetails.description}</p>
+                            
+                            <div style={{display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 20, justifyContent: 'center'}}>
+                                <span style={{background: 'rgba(59, 130, 246, 0.1)', color: 'var(--primary)', padding: '5px 10px', borderRadius: 6, fontWeight: 'bold', fontSize: '0.9rem'}}>
+                                    #{selectedCampaignForDetails.requiredHashtag}
+                                </span>
+                                <span style={{background: 'rgba(59, 130, 246, 0.1)', color: 'var(--primary)', padding: '5px 10px', borderRadius: 6, fontWeight: 'bold', fontSize: '0.9rem'}}>
+                                    @{selectedCampaignForDetails.requiredMention}
+                                </span>
+                            </div>
 
-                {/* Cabeçalho da Campanha */}
-                <div style={{background: 'var(--bg-card)', padding: '30px', borderRadius: '16px', border: '1px solid var(--border)', marginBottom: '30px'}}>
-                    <div style={{display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '20px', marginBottom: '20px'}}>
+                            <button className="btn btn-primary" onClick={() => { setSelectedCampaignId(selectedCampaignForDetails.id); setView('my-videos'); }}>
+                                Enviar Vídeo para essa Campanha
+                            </button>
+                        </div>
+
+                        {/* Lado Direito: Componente Circular Dinâmico */}
                         <div>
-                            <h1 style={{fontSize: '2rem', marginBottom: '10px'}}>{selectedCampaignForDetails.title}</h1>
-                            <div style={{display: 'flex', gap: '15px', color: 'var(--text-muted)', fontSize: '0.9rem'}}>
-                                <span><Icons.Clock size={14} /> Início: {formatDate(selectedCampaignForDetails.startDate)}</span>
-                                <span><Icons.Clock size={14} /> Fim: {formatDate(selectedCampaignForDetails.endDate)}</span>
-                            </div>
+                            <CircularRemaining 
+                                startStr={selectedCampaignForDetails.startDate} 
+                                endStr={selectedCampaignForDetails.endDate} 
+                                size={140}
+                            />
                         </div>
-                        <div style={{textAlign: 'right'}}>
-                            <div style={{fontSize: '0.9rem', color: 'var(--text-muted)'}}>CPM da Campanha</div>
-                            <div style={{fontSize: '1.5rem', fontWeight: 'bold', color: 'var(--success)'}}>{formatCurrency(selectedCampaignForDetails.cpm)} <span style={{fontSize: '0.9rem', color: 'var(--text-muted)'}}>/1k views</span></div>
-                        </div>
-                    </div>
-
-                    <div style={{background: 'var(--bg-card-hover)', padding: '20px', borderRadius: '12px', border: '1px solid var(--border)', marginBottom: '20px'}}>
-                        <h3 style={{fontSize: '1.1rem', marginBottom: '10px'}}>Regras e Descrição</h3>
-                        <p style={{color: 'var(--text-muted)', lineHeight: '1.6', marginBottom: '15px'}}>{selectedCampaignForDetails.description}</p>
-                        <div style={{display: 'flex', gap: '20px', flexWrap: 'wrap'}}>
-                            <div style={{display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--primary)', fontWeight: '600'}}>
-                                <Icons.AlertCircle size={18} /> Hashtag: #{selectedCampaignForDetails.requiredHashtag}
-                            </div>
-                            <div style={{display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--primary)', fontWeight: '600'}}>
-                                <Icons.User size={18} /> Marcar: @{selectedCampaignForDetails.requiredMention}
-                            </div>
-                        </div>
-                    </div>
-
-                    <div style={{textAlign: 'center'}}>
-                        <button className="btn btn-primary" onClick={() => {
-                            setSelectedCampaignId(selectedCampaignForDetails.id);
-                            changeView('my-videos');
-                        }} style={{padding: '12px 30px', fontSize: '1rem'}}>
-                            <Icons.Play size={20} style={{marginRight: '8px'}} /> Enviar Vídeo para essa Campanha
-                        </button>
                     </div>
                 </div>
 
-                {/* Seção de Ranking */}
-                <h2 style={{fontSize: '1.5rem', marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '10px'}}>
-                    <Icons.Trophy size={28} color="#fbbf24" /> Ranking da Campanha
-                </h2>
-                
-                <div style={{background: 'var(--bg-card)', borderRadius: '16px', border: '1px solid var(--border)', padding: '20px'}}>
-                    <div className="rank-tab-container">
-                        <button className={`rank-tab ${rankingTab === 'total' ? 'active' : ''}`} onClick={() => setRankingTab('total')}>Total</button>
-                        <button className={`rank-tab ${rankingTab === 'weekly' ? 'active' : ''}`} onClick={() => setRankingTab('weekly')}>Semanal</button>
-                        <button className={`rank-tab ${rankingTab === 'daily' ? 'active' : ''}`} onClick={() => setRankingTab('daily')}>Diário</button>
-                    </div>
+                {/* ESTATÍSTICAS DO POTE */}
+                <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 20, marginBottom: 40}}>
+                   <StatCard label="Pote Semanal" value={formatCurrency(campaignEconomics.weeklyPot)} subtext="Valor distribuído esta semana" icon={Icons.Wallet} color="var(--success)" />
+                   <StatCard label="Total Views (Todos)" value={campaignEconomics.totalViews.toLocaleString()} icon={Icons.BarChart3} color="var(--primary)" />
+                   <StatCard label="Sua Fatura Estimada" value={formatCurrency(campaignEconomics.myEarnings)} subtext="Baseado na sua % atual" icon={Icons.Target} color="#fbbf24" />
+                </div>
 
-                    <div className="ranking-list">
-                        {generateMockRanking(rankingTab, userData.name).map((user, index) => (
-                            <div key={index} className="ranking-item" style={user.isMe ? {borderColor: 'var(--primary)', background: 'rgba(59, 130, 246, 0.1)'} : {}}>
-                                <div className="ranking-pos">
-                                    {index === 0 ? <span className="medal">🥇</span> : 
-                                     index === 1 ? <span className="medal">🥈</span> : 
-                                     index === 2 ? <span className="medal">🥉</span> : 
-                                     `#${index + 1}`}
-                                </div>
-                                <div className="ranking-name">
-                                    <div style={{width: '36px', height: '36px', borderRadius: '50%', background: 'var(--bg-card)', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.8rem', fontWeight: 'bold'}}>{user.avatar}</div>
-                                    {user.name}
-                                </div>
-                                <div className="ranking-score">{user.views.toLocaleString()} <span style={{fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: 'normal'}}>Views</span></div>
+                {/* RANKING REAL */}
+                <div style={{background: 'var(--bg-card)', borderRadius: 12, border: '1px solid var(--border)'}}>
+                    <div style={{padding: 20, borderBottom: '1px solid var(--border)', fontWeight: 'bold'}}>Ranking Semanal</div>
+                    {rankingList.length === 0 ? <div style={{padding: 30, textAlign: 'center', color: 'var(--text-muted)'}}>Nenhum vídeo aprovado ainda.</div> :
+                     rankingList.map((user, index) => (
+                        <div key={user.userId} className="ranking-item" style={user.isMe ? {background: 'rgba(59, 130, 246, 0.05)'} : {}}>
+                            <div className="ranking-pos" style={{color: index < 3 ? '#fbbf24' : 'var(--text-muted)'}}>{index + 1}º</div>
+                            <div style={{flex: 1}}>
+                                <div style={{fontWeight: user.isMe ? 'bold' : 'normal'}}>{user.name} {user.isMe && '(Você)'}</div>
+                                <div style={{fontSize: '0.8rem', color: 'var(--text-muted)'}}>{user.videoCount} vídeos enviados</div>
                             </div>
-                        ))}
-                    </div>
+                            <div style={{textAlign: 'right'}}>
+                                <div style={{fontWeight: 'bold'}}>{user.totalViews.toLocaleString()} views</div>
+                                <div style={{fontSize: '0.85rem', color: 'var(--success)', fontWeight: 'bold'}}>{user.sharePercentage.toFixed(2)}% do Pote</div>
+                            </div>
+                        </div>
+                    ))}
                 </div>
             </div>
         )}
 
         {view === 'my-videos' && (
           <div className="fade-in-up">
-            <h1 style={{ fontSize: '1.8rem', marginBottom: '10px' }}>Postar e Rastrear</h1>
-            <p style={{ color: 'var(--text-muted)', marginBottom: '30px' }}>Envie o link do seu corte publicado.</p>
-            <div style={{ background: 'var(--bg-card)', padding: '30px', borderRadius: '16px', border: '1px solid var(--border)', marginBottom: '40px' }}>
+            <h1 style={{marginBottom: 20}}>Meus Vídeos</h1>
+            <div style={{background: 'var(--bg-card)', padding: 25, borderRadius: 12, border: '1px solid var(--border)', marginBottom: 40}}>
                 <form onSubmit={handleSubmitVideo}>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '20px' }}>
-                        <div>
-                            <label style={{ display: 'block', marginBottom: '8px', fontSize: '0.9rem', color: 'var(--text-muted)' }}>Selecione a Campanha que você participa</label>
-                            <div className="dash-input-wrapper">
-                                <select className="dash-input" style={{ cursor: 'pointer', color: selectedCampaignId ? 'var(--text-main)' : 'var(--text-muted)' }} value={selectedCampaignId} onChange={(e) => setSelectedCampaignId(e.target.value)} required>
-                                    <option value="" disabled>Selecione...</option>
-                                    {availableCampaigns.filter(c => userData.joinedCampaigns?.includes(c.id)).map(c => (<option key={c.id} value={c.id} style={{color: 'black'}}>{c.title}</option>))}
-                                </select>
-                            </div>
-                        </div>
-                        {selectedCampaignId && (() => {
-                            const details = getSelectedCampaignDetails();
-                            if(details) {
-                                return (
-                                    <div className="requirement-box">
-                                        <div style={{fontWeight: 'bold', marginBottom: '5px', display: 'flex', alignItems: 'center', gap: '5px'}}><Icons.AlertCircle size={18} /> Atenção às Regras Obrigatórias:</div>
-                                        <ul style={{listStyle: 'inside', marginLeft: '5px'}}>
-                                            <li>Use a hashtag: <span style={{fontWeight: 'bold', textDecoration: 'underline'}}>#{details.requiredHashtag}</span></li>
-                                            <li>Marque o perfil: <span style={{fontWeight: 'bold', textDecoration: 'underline'}}>@{details.requiredMention}</span></li>
-                                        </ul>
-                                    </div>
-                                )
-                            }
-                        })()}
-                        <div>
-                            <label style={{ display: 'block', marginBottom: '8px', fontSize: '0.9rem', color: 'var(--text-muted)' }}>Link do Vídeo</label>
-                            <div className="dash-input-wrapper">
-                                <input type="text" className="dash-input" placeholder="Cole o link aqui..." value={videoUrl} onChange={(e) => setVideoUrl(e.target.value)} required />
-                            </div>
-                        </div>
-                    </div>
-                    <button type="submit" className="btn btn-primary" style={{ marginTop: '20px', width: '100%', display: 'flex', justifyContent: 'center', gap: '10px' }} disabled={submittingVideo || !selectedCampaignId}>
-                        {submittingVideo ? 'Validando...' : <><Icons.Play size={20} /> Registrar Vídeo</>}
-                    </button>
+                    <label style={{display: 'block', marginBottom: 10}}>Campanha</label>
+                    <select style={{width: '100%', padding: 12, marginBottom: 20, borderRadius: 8, background: 'var(--bg-dark)', color: 'var(--text-main)', border: '1px solid var(--border)'}} value={selectedCampaignId} onChange={(e) => setSelectedCampaignId(e.target.value)} required>
+                        <option value="">Selecione...</option>
+                        {myCampaignsList.map(c => <option key={c.id} value={c.id}>{c.title}</option>)}
+                    </select>
+                    <label style={{display: 'block', marginBottom: 10}}>Link</label>
+                    <input type="url" style={{width: '100%', padding: 12, marginBottom: 20, borderRadius: 8, background: 'var(--bg-dark)', color: 'var(--text-main)', border: '1px solid var(--border)'}} value={videoUrl} onChange={(e) => setVideoUrl(e.target.value)} required />
+                    <button type="submit" className="btn btn-primary" style={{width: '100%'}} disabled={submittingVideo}>{submittingVideo ? 'Enviando...' : 'Registrar'}</button>
                 </form>
             </div>
-            <h2 style={{fontSize: '1.4rem', marginBottom: '20px'}}>Meus Envios</h2>
-            <div style={{display: 'flex', flexDirection: 'column', gap: '15px'}}>
-                {myVideos.length === 0 ? (
-                    <div style={{padding: '40px', textAlign: 'center', background: 'var(--bg-card)', borderRadius: '12px', border: '1px dashed var(--border)', color: 'var(--text-muted)'}}>Nenhum vídeo registrado.</div>
-                ) : (
-                    myVideos.map(video => (
-                        <div key={video.id} style={{background: 'var(--bg-card)', padding: '20px', borderRadius: '12px', border: '1px solid var(--border)', display: 'flex', flexWrap: 'wrap', gap: '20px', alignItems: 'center', justifyContent: 'space-between'}}>
-                            <div style={{display: 'flex', gap: '15px', alignItems: 'center', minWidth: '300px', flex: 1}}>
-                                <div className={`video-platform-icon ${video.platform === 'youtube' ? 'youtube-bg' : video.platform === 'tiktok' ? 'tiktok-bg' : 'instagram-bg'}`}><Icons.Play size={16} /></div>
-                                <div style={{overflow: 'hidden'}}>
-                                    <div style={{fontWeight: 'bold', fontSize: '1rem'}}>{video.campaignTitle}</div>
-                                    <div style={{display: 'flex', gap: '10px', fontSize: '0.85rem'}}>
-                                        <a href={video.url} target="_blank" rel="noreferrer" style={{color: 'var(--primary)', textDecoration: 'none'}}>Abrir Link ↗</a>
-                                    </div>
-                                </div>
-                            </div>
-                            <div style={{display: 'flex', gap: '40px', alignItems: 'center', margin: '0 20px'}}>
-                                <div style={{textAlign: 'center'}}>
-                                    <div style={{fontSize: '0.8rem', color: 'var(--text-muted)'}}>Status</div>
-                                    <div style={{fontWeight: 'bold', color: video.status === 'approved' ? 'var(--success)' : video.status === 'rejected' ? 'var(--danger)' : 'var(--warning)'}}>
-                                        {video.status === 'approved' ? 'Aprovado' : video.status === 'rejected' ? 'Rejeitado' : 'Em Análise'}
-                                    </div>
-                                </div>
-                                <div style={{textAlign: 'center'}}>
-                                    <div style={{fontSize: '0.8rem', color: 'var(--text-muted)'}}>Visualizações</div>
-                                    <div style={{fontSize: '1.3rem', fontWeight: 'bold'}}>
-                                        {video.status === 'approved' ? video.views.toLocaleString() : <span style={{fontSize: '1rem', color: 'var(--text-muted)'}}>---</span>}
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    ))
-                )}
-            </div>
+            {myVideos.map(video => (
+                <div key={video.id} style={{background: 'var(--bg-card)', padding: 15, borderRadius: 8, border: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10}}>
+                    <div>
+                        <div style={{fontWeight: 'bold'}}>{video.campaignTitle}</div>
+                        <a href={video.url} target="_blank" rel="noreferrer" style={{fontSize: '0.85rem', color: 'var(--primary)'}}>Abrir Vídeo</a>
+                    </div>
+                    <div style={{textAlign: 'right'}}>
+                        <div style={{fontWeight: 'bold'}}>{video.views.toLocaleString()} views</div>
+                        <span className={`video-status-badge ${checkIsActive(video.createdAt) ? 'status-active' : 'status-expired'}`}>{checkIsActive(video.createdAt) ? 'Ativo' : 'Expirado'}</span>
+                    </div>
+                </div>
+            ))}
           </div>
         )}
 
         {view === 'experience' && (
           <div className="fade-in-up">
-            <h1 style={{ fontSize: '1.8rem', marginBottom: '30px' }}>Meu Progresso</h1>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '30px' }}>
-                <div style={{ background: 'var(--bg-card)', padding: '40px', borderRadius: '20px', border: '1px solid var(--border)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-                    <h2 style={{ marginBottom: '20px', color: currentRank.color }}>Elo {currentRank.name}</h2>
-                    {typeof progress === 'object' ? (<CircularProgress value={progress.current} max={progress.total} color={currentRank.color} />) : (<div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: 'var(--primary)', padding: '40px' }}>Nível Máximo!</div>)}
+            <h1 style={{marginBottom: 30}}>Nível & Rankings</h1>
+            
+            <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 30, marginBottom: 50}}>
+                <div style={{background: 'var(--bg-card)', padding: 30, borderRadius: 20, border: '1px solid var(--border)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center'}}>
+                    <h2 style={{marginBottom: 20, color: currentRank.color}}>Elo {currentRank.name}</h2>
+                    <CircularProgress value={progress.current} max={progress.total} color={currentRank.color} />
+                    <div style={{marginTop: 20, fontWeight: 'bold'}}>{userData.xp} XP Total</div>
                 </div>
                 <div>
-                    <h3 style={{ marginBottom: '20px', fontSize: '1.2rem' }}>Como ganhar XP?</h3>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
+                    <h3 style={{marginBottom: 20}}>Como ganhar XP?</h3>
+                    <div style={{display: 'flex', flexDirection: 'column', gap: 15}}>
                         {XP_RULES.map((rule, i) => (
-                            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '15px', background: 'var(--bg-card)', padding: '15px', borderRadius: '12px', border: '1px solid var(--border)' }}>
-                                <div style={{ background: 'var(--bg-card-hover)', padding: '10px', borderRadius: '8px', color: 'var(--primary)' }}><rule.icon size={20} /></div>
-                                <div style={{ flex: 1 }}><div style={{ fontWeight: '500' }}>{rule.action}</div></div>
-                                <div style={{ fontWeight: 'bold', color: 'var(--success)' }}>+{rule.xp} XP</div>
+                            <div key={i} style={{display: 'flex', alignItems: 'center', gap: 15, background: 'var(--bg-card)', padding: 15, borderRadius: 12, border: '1px solid var(--border)'}}>
+                                <div style={{background: 'var(--bg-card-hover)', padding: 10, borderRadius: 8, color: 'var(--primary)'}}><rule.icon size={20} /></div>
+                                <div style={{flex: 1, fontWeight: '500'}}>{rule.action}</div>
+                                <div style={{fontWeight: 'bold', color: 'var(--success)'}}>+{rule.xp} XP</div>
                             </div>
                         ))}
                     </div>
                 </div>
+            </div>
+
+            <h2 style={{marginBottom: 20, display: 'flex', alignItems: 'center', gap: 10}}><Icons.Globe size={24} /> Ranking Global (Top 10 XP)</h2>
+            <div style={{background: 'var(--bg-card)', borderRadius: 12, border: '1px solid var(--border)', marginBottom: 50, overflow: 'hidden'}}>
+                {globalRanking.length === 0 ? <div style={{padding: 20}}>Carregando ranking...</div> : 
+                 globalRanking.map((user, index) => (
+                    <div key={index} className="ranking-item" style={user.isMe ? {background: 'rgba(59, 130, 246, 0.1)', borderColor: 'var(--primary)'} : {}}>
+                        <div className="ranking-pos" style={{color: index < 3 ? '#fbbf24' : 'var(--text-muted)'}}>{index + 1}º</div>
+                        <div style={{flex: 1, fontWeight: user.isMe ? 'bold' : 'normal'}}>{user.name} {user.isMe && '(Você)'}</div>
+                        <div style={{marginRight: 20, fontSize: '0.85rem', padding: '2px 8px', borderRadius: 4, background: 'var(--bg-card-hover)'}}>{user.rankLevel}</div>
+                        <div style={{fontWeight: 'bold', color: 'var(--primary)'}}>{user.xp} XP</div>
+                    </div>
+                 ))
+                }
+            </div>
+
+            <h2 style={{marginBottom: 20, display: 'flex', alignItems: 'center', gap: 10}}><Icons.Trophy size={24} /> Campanhas que participo</h2>
+            <div style={{display: 'grid', gap: 15}}>
+                {myCampaignsList.length === 0 ? <p style={{color: 'var(--text-muted)'}}>Você não está em nenhuma campanha.</p> :
+                 myCampaignsList.map(camp => (
+                    <div key={camp.id} style={{background: 'var(--bg-card)', padding: 20, borderRadius: 12, border: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer'}} onClick={() => openCampaignDetails(camp)}>
+                        <div style={{fontWeight: 'bold'}}>{camp.title}</div>
+                        <div style={{color: 'var(--primary)', fontSize: '0.9rem'}}>Ver minha posição →</div>
+                    </div>
+                 ))
+                }
             </div>
           </div>
         )}

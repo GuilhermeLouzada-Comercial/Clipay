@@ -108,6 +108,7 @@ export default function SignupPage() {
         createdAt: serverTimestamp(),
         pixKey: "", 
         xp: 0,
+        saldo: 0,
         views: 0,
         videos: 0,
       });
