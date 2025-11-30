@@ -314,7 +314,7 @@ export default function ClipperDashboard() {
         .campaign-card { background: var(--bg-card); border: 1px solid var(--border); borderRadius: 12px; padding: 25px; transition: all 0.3s ease; display: flex; height: 100%; min-height: 280px; position: relative; }
         .campaign-card:hover { transform: translateY(-5px); border-color: var(--primary); box-shadow: var(--shadow-card); }
         
-        .campaign-card.clickable { cursor: pointer; border-left: 4px solid var(--primary); }
+        .campaign-card.clickable { cursor: pointer; }
         .campaign-card.clickable:hover { background: var(--bg-card-hover); }
 
         .video-platform-icon { display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 50%; color: white; }
