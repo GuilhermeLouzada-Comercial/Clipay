@@ -1089,6 +1089,17 @@ body {
   }
   /* Ajuste fino para o logo não bater no botão centralizado em telas muito pequenas */
   .logo span { display: none; } 
+
+  .hide-mobile {
+    display: none !important;
+  }
+
+}
+
+@media (min-width: 769px) {
+  .hide-desktop {
+    display: none !important
+  }
 }
 
 /* --- FAQ SECTION --- */
