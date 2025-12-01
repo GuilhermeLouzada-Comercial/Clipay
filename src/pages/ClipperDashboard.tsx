@@ -14,7 +14,9 @@ import {
   serverTimestamp, 
   arrayUnion,
   orderBy,
-  limit
+  limit,
+  writeBatch,
+  increment   
 } from 'firebase/firestore';
 import { useNavigate } from 'react-router-dom';
 
@@ -104,11 +106,11 @@ const formatDate = (dateString?: string) => {
   }
 };
 
-const getDaysDiff = (startStr: string, endStr: string) => {
-    const start = new Date(startStr);
-    const end = new Date(endStr);
-    const diff = Math.abs(end.getTime() - start.getTime());
-    return Math.ceil(diff / (1000 * 3600 * 24)) || 1;
+const getDaysDiff = (startInput: string | Date, endInput: string | Date) => {
+  const start = new Date(startInput);
+  const end = new Date(endInput);
+  const diff = Math.abs(end.getTime() - start.getTime());
+  return Math.ceil(diff / (1000 * 3600 * 24)) || 1;
 };
 
 // Nova função para calcular dias restantes para UI
@@ -368,7 +370,18 @@ export default function ClipperDashboard() {
         // 1. Calcular o Pote Semanal (Orçamento / Dias * 7)
         const totalDays = getDaysDiff(campaign.startDate, campaign.endDate);
         const dailyBudget = campaign.budget / totalDays;
-        const weeklyPot = dailyBudget * 7;
+        let today = new Date();
+        let weeklyPot = 0;
+        
+        const daysRemaining = getDaysDiff(today, campaign.endDate);
+
+        if (daysRemaining < 7) {
+            // Se faltam só 3 dias, o pote é: valor_diario * 3
+            weeklyPot = dailyBudget * daysRemaining;
+        } else {
+            // Caso contrário, o pote é cheio (7 dias)
+            weeklyPot = dailyBudget * 7;
+        }
 
         // 2. Buscar TODOS os vídeos aprovados da campanha
         const vQuery = query(collection(db, "videos"), where("campaignId", "==", campaign.id), where("status", "==", "approved"));
@@ -485,6 +498,73 @@ export default function ClipperDashboard() {
       } catch (error) { console.error(error); alert("Erro ao enviar vídeo."); } finally { setSubmittingVideo(false); }
   };
 
+  // --- FUNÇÃO DE PAGAMENTO (ADMIN/SIMULAÇÃO) ---
+  const handleSimulatePayout = async () => {
+    if (!auth.currentUser || !selectedCampaignForDetails) return;
+    
+    // Trava de segurança simples
+    const confirmMessage = `ATENÇÃO: Isso é uma simulação de fechamento de semana.\n\n` +
+                           `Valor Total do Pote: ${formatCurrency(campaignEconomics.weeklyPot)}\n` +
+                           `Esse valor será DESCONTADO da Campanha e ADICIONADO ao saldo dos Clipadores.\n\n` +
+                           `Deseja continuar?`;
+                           
+    if (!window.confirm(confirmMessage)) return;
+
+    setLoading(true);
+
+    try {
+        const batch = writeBatch(db);
+
+        // 1. Atualizar a Campanha (Desconta do Orçamento)
+        const campaignRef = doc(db, "campaigns", selectedCampaignForDetails.id);
+        
+        // Reduz o budget e aumenta o valor "gasto" (opcional, bom para controle)
+        batch.update(campaignRef, {
+            budget: increment(-campaignEconomics.weeklyPot), 
+            totalSpent: increment(campaignEconomics.weeklyPot) // Certifique-se de que esse campo existe ou o firebase cria
+        });
+
+        // 2. Pagar cada Clipador
+        // Usamos a lista 'rankingList' que já calculou quanto cada um deve receber
+        rankingList.forEach((user) => {
+            if (user.estimatedEarnings > 0) {
+                const userRef = doc(db, "users", user.userId);
+                
+                // Aumenta o saldo do clipador
+                batch.update(userRef, {
+                    saldo: increment(user.estimatedEarnings),
+                    xp: increment(user.estimatedEarnings * 0.1) // Bônus: Ganha XP proporcional ao dinheiro ganho (ex: 10%)
+                });
+
+                // (Opcional) Criar um registro de transação/extrato
+                const transactionRef = doc(collection(db, "transactions"));
+                batch.set(transactionRef, {
+                    userId: user.userId,
+                    amount: user.estimatedEarnings,
+                    type: 'weekly_payout',
+                    campaignId: selectedCampaignForDetails.id,
+                    campaignTitle: selectedCampaignForDetails.title,
+                    createdAt: serverTimestamp()
+                });
+            }
+        });
+
+        // 3. Executar tudo de uma vez
+        await batch.commit();
+
+        alert("Pagamento realizado com sucesso! Saldos atualizados.");
+        
+        // Recarregar os dados para ver o novo saldo
+        window.location.reload(); 
+
+    } catch (error) {
+        console.error("Erro no pagamento:", error);
+        alert("Erro ao processar pagamentos.");
+    } finally {
+        setLoading(false);
+    }
+  };
+
   const changeView = (newView: ViewType) => { setView(newView); setIsMobileMenuOpen(false); };
   const myCampaignsList = availableCampaigns.filter(c => userData.joinedCampaigns?.includes(c.id));
   const availableList = availableCampaigns.filter(c => !userData.joinedCampaigns?.includes(c.id));
@@ -556,26 +636,27 @@ export default function ClipperDashboard() {
 
         {view === 'campaigns' && (
           <div className="fade-in-up">
-            <h2 style={{marginBottom: 20}}>Minhas Campanhas</h2>
+            <h2 style={{marginBottom: 20, display: 'flex', alignItems: 'center'}}><Icons.Play size={24} style={{marginRight: 8}} />Minhas Campanhas</h2>
             {myCampaignsList.length === 0 ? <p style={{color: 'var(--text-muted)'}}>Nenhuma. Veja as disponíveis abaixo.</p> : (
                 <div className="campaign-grid">
                     {myCampaignsList.map(camp => (
                         <div key={camp.id} className="campaign-card" style={{cursor: 'pointer', borderColor: 'var(--primary)'}} onClick={() => openCampaignDetails(camp)}>
                             <h3>{camp.title}</h3>
                             <p style={{fontSize: '0.9rem', color: 'var(--text-muted)', margin: '10px 0'}}>{camp.description.substring(0, 80)}...</p>
+                            <p style={{fontSize: '0.85rem', marginBottom: 15}}>Prazo: {formatDate(camp.startDate)} até {formatDate(camp.endDate)}</p>
                             <button className="btn btn-primary" style={{width: '100%', marginTop: 'auto'}}>Ver Ranking & Pote</button>
                         </div>
                     ))}
                 </div>
             )}
-            <h2 style={{marginTop: 40, marginBottom: 20}}>Disponíveis</h2>
+            <h2 style={{marginTop: 40, marginBottom: 20, display: 'flex', alignItems: 'center'}}><Icons.Briefcase size={24} style={{marginRight: 10}} />Disponíveis</h2>
             <div className="campaign-grid">
                 {availableList.map(camp => (
-                    <div key={camp.id} className="campaign-card">
+                    <div key={camp.id} className="campaign-card" style={{cursor: 'pointer', borderColor: 'var(--border)'}} onClick={() => openCampaignDetails(camp)}>
                         <h3>{camp.title}</h3>
                         <p style={{color: 'var(--success)', fontWeight: 'bold'}}>{formatCurrency(camp.budget)} Total</p>
                         <p style={{fontSize: '0.85rem', marginTop: 5}}>Prazo: {formatDate(camp.startDate)} até {formatDate(camp.endDate)}</p>
-                        <button className="btn btn-outline" style={{marginTop: 15}} onClick={(e) => handleJoinCampaign(camp.id, e)}>Participar</button>
+                        <button className="btn btn-outline" style={{marginTop: 15, width: '100%'}}>Ver Ranking e Pote</button>
                     </div>
                 ))}
             </div>
@@ -591,16 +672,16 @@ export default function ClipperDashboard() {
                     <Icons.ArrowRight size={16} style={{transform: 'rotate(180deg)'}} /> Voltar para Campanhas
                 </button>
                 
-                {/* --- HEADER DA CAMPANHA (COM CÍRCULO DINÂMICO) --- */}
-                <div className="campaign-header" style={{background: 'var(--bg-card)', padding: 25, borderRadius: 12, border: '1px solid var(--border)', marginBottom: 30}}>
-                    <div style={{display: 'flex', justifyContent: 'center', alignItems: 'center', flexWrap: 'wrap', gap: 20, textAlign: 'center'}}>
+                {/* --- HEADER DA CAMPANHA (COM CÍRCULO DINÂMICO E BOTÃO CONDICIONAL) --- */}
+                  <div style={{background: 'var(--bg-card)', padding: 25, borderRadius: 12, border: '1px solid var(--border)', marginBottom: 30}}>
+                    <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 20}}>
                         
                         {/* Lado Esquerdo: Textos e Tags */}
                         <div style={{flex: 1, minWidth: '250px'}}>
                             <h1 style={{fontSize: '1.8rem', marginBottom: 10}}>{selectedCampaignForDetails.title}</h1>
                             <p style={{color: 'var(--text-muted)', marginBottom: 15}}>{selectedCampaignForDetails.description}</p>
                             
-                            <div style={{display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 20, justifyContent: 'center'}}>
+                            <div style={{display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 20}}>
                                 <span style={{background: 'rgba(59, 130, 246, 0.1)', color: 'var(--primary)', padding: '5px 10px', borderRadius: 6, fontWeight: 'bold', fontSize: '0.9rem'}}>
                                     #{selectedCampaignForDetails.requiredHashtag}
                                 </span>
@@ -609,9 +690,18 @@ export default function ClipperDashboard() {
                                 </span>
                             </div>
 
-                            <button className="btn btn-primary" onClick={() => { setSelectedCampaignId(selectedCampaignForDetails.id); setView('my-videos'); }}>
-                                Enviar Vídeo para essa Campanha
-                            </button>
+                            {/* LÓGICA DO BOTÃO: PARTICIPAR vs ENVIAR */}
+                            {userData.joinedCampaigns?.includes(selectedCampaignForDetails.id) ? (
+                                <button className="btn btn-primary" onClick={() => { setSelectedCampaignId(selectedCampaignForDetails.id); setView('my-videos'); }}>
+                                    <Icons.Play size={20} style={{marginRight: 8}} />
+                                    Enviar Vídeo para essa Campanha
+                                </button>
+                            ) : (
+                                <button className="btn btn-primary" onClick={(e) => handleJoinCampaign(selectedCampaignForDetails.id, e)} style={{background: 'var(--success)', border: 'none'}}>
+                                    <Icons.Briefcase size={20} style={{marginRight: 8}} />
+                                    Participar da Campanha
+                                </button>
+                            )}
                         </div>
 
                         {/* Lado Direito: Componente Circular Dinâmico */}
@@ -624,13 +714,28 @@ export default function ClipperDashboard() {
                         </div>
                     </div>
                 </div>
-
                 {/* ESTATÍSTICAS DO POTE */}
                 <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 20, marginBottom: 40}}>
                    <StatCard label="Pote Semanal" value={formatCurrency(campaignEconomics.weeklyPot)} subtext="Valor distribuído esta semana" icon={Icons.Wallet} color="var(--success)" />
                    <StatCard label="Total Views (Todos)" value={campaignEconomics.totalViews.toLocaleString()} icon={Icons.BarChart3} color="var(--primary)" />
                    <StatCard label="Sua Fatura Estimada" value={formatCurrency(campaignEconomics.myEarnings)} subtext="Baseado na sua % atual" icon={Icons.Target} color="#fbbf24" />
                 </div>
+
+                {/* --- BOTÃO DE PAGAMENTO (ADMIN/DEV ONLY) --- */}
+                {/* Em produção, você envolveria isso numa verificação if (userData.role === 'admin') */}
+                <div style={{marginBottom: 40, padding: 20, border: '1px dashed #fbbf24', borderRadius: 12, background: 'rgba(251, 191, 36, 0.05)'}}>
+                    <h3 style={{color: '#fbbf24', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 10}}>
+                        <Icons.Lock size={20} /> Área de Simulação de Pagamento
+                    </h3>
+                    <p style={{fontSize: '0.9rem', color: 'var(--text-muted)', marginBottom: 15}}>
+                        Ao clicar abaixo, o sistema irá distribuir <strong>{formatCurrency(campaignEconomics.weeklyPot)}</strong> entre os clipadores listados abaixo e descontar do orçamento da campanha.
+                    </p>
+                    <button onClick={handleSimulatePayout} className="btn" style={{background: '#fbbf24', color: 'black', border: 'none', fontWeight: 'bold'}}>
+                        <Icons.Wallet size={20} style={{marginRight: 8}} />
+                        Simular Fechamento da Semana (Pagar Todos)
+                    </button>
+                </div>
+
 
                 {/* RANKING REAL */}
                 <div style={{background: 'var(--bg-card)', borderRadius: 12, border: '1px solid var(--border)'}}>
