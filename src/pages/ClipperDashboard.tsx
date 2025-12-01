@@ -16,7 +16,8 @@ import {
   orderBy,
   limit,
   writeBatch,
-  increment   
+  increment,
+  Timestamp
 } from 'firebase/firestore';
 import { useNavigate } from 'react-router-dom';
 
@@ -43,6 +44,7 @@ interface UserData {
   xp: number;
   saldo: number;
   joinedCampaigns?: string[];
+  role?: string;
 }
 
 interface Campaign {
@@ -56,6 +58,7 @@ interface Campaign {
   status: 'active' | 'full' | 'finished' | 'pending_payment';
   startDate: string;
   endDate: string;
+  nextPayout?: any; 
 }
 
 interface SubmittedVideo {
@@ -264,6 +267,10 @@ export default function ClipperDashboard() {
   const [selectedCampaignForDetails, setSelectedCampaignForDetails] = useState<Campaign | null>(null);
   const [rankingList, setRankingList] = useState<RankingItem[]>([]);
   const [campaignEconomics, setCampaignEconomics] = useState({ weeklyPot: 0, totalViews: 0, myEarnings: 0 });
+
+  // Controle de Pagamento
+  const [payoutDue, setPayoutDue] = useState(false);
+  const [nextPayoutDate, setNextPayoutDate] = useState<Date | null>(null);
 
   // Tema
   const [theme, setTheme] = useState<'dark' | 'light'>('light');
@@ -498,73 +505,6 @@ export default function ClipperDashboard() {
       } catch (error) { console.error(error); alert("Erro ao enviar vídeo."); } finally { setSubmittingVideo(false); }
   };
 
-  // --- FUNÇÃO DE PAGAMENTO (ADMIN/SIMULAÇÃO) ---
-  const handleSimulatePayout = async () => {
-    if (!auth.currentUser || !selectedCampaignForDetails) return;
-    
-    // Trava de segurança simples
-    const confirmMessage = `ATENÇÃO: Isso é uma simulação de fechamento de semana.\n\n` +
-                           `Valor Total do Pote: ${formatCurrency(campaignEconomics.weeklyPot)}\n` +
-                           `Esse valor será DESCONTADO da Campanha e ADICIONADO ao saldo dos Clipadores.\n\n` +
-                           `Deseja continuar?`;
-                           
-    if (!window.confirm(confirmMessage)) return;
-
-    setLoading(true);
-
-    try {
-        const batch = writeBatch(db);
-
-        // 1. Atualizar a Campanha (Desconta do Orçamento)
-        const campaignRef = doc(db, "campaigns", selectedCampaignForDetails.id);
-        
-        // Reduz o budget e aumenta o valor "gasto" (opcional, bom para controle)
-        batch.update(campaignRef, {
-            budget: increment(-campaignEconomics.weeklyPot), 
-            totalSpent: increment(campaignEconomics.weeklyPot) // Certifique-se de que esse campo existe ou o firebase cria
-        });
-
-        // 2. Pagar cada Clipador
-        // Usamos a lista 'rankingList' que já calculou quanto cada um deve receber
-        rankingList.forEach((user) => {
-            if (user.estimatedEarnings > 0) {
-                const userRef = doc(db, "users", user.userId);
-                
-                // Aumenta o saldo do clipador
-                batch.update(userRef, {
-                    saldo: increment(user.estimatedEarnings),
-                    xp: increment(user.estimatedEarnings * 0.1) // Bônus: Ganha XP proporcional ao dinheiro ganho (ex: 10%)
-                });
-
-                // (Opcional) Criar um registro de transação/extrato
-                const transactionRef = doc(collection(db, "transactions"));
-                batch.set(transactionRef, {
-                    userId: user.userId,
-                    amount: user.estimatedEarnings,
-                    type: 'weekly_payout',
-                    campaignId: selectedCampaignForDetails.id,
-                    campaignTitle: selectedCampaignForDetails.title,
-                    createdAt: serverTimestamp()
-                });
-            }
-        });
-
-        // 3. Executar tudo de uma vez
-        await batch.commit();
-
-        alert("Pagamento realizado com sucesso! Saldos atualizados.");
-        
-        // Recarregar os dados para ver o novo saldo
-        window.location.reload(); 
-
-    } catch (error) {
-        console.error("Erro no pagamento:", error);
-        alert("Erro ao processar pagamentos.");
-    } finally {
-        setLoading(false);
-    }
-  };
-
   const changeView = (newView: ViewType) => { setView(newView); setIsMobileMenuOpen(false); };
   const myCampaignsList = availableCampaigns.filter(c => userData.joinedCampaigns?.includes(c.id));
   const availableList = availableCampaigns.filter(c => !userData.joinedCampaigns?.includes(c.id));
@@ -720,23 +660,6 @@ export default function ClipperDashboard() {
                    <StatCard label="Total Views (Todos)" value={campaignEconomics.totalViews.toLocaleString()} icon={Icons.BarChart3} color="var(--primary)" />
                    <StatCard label="Sua Fatura Estimada" value={formatCurrency(campaignEconomics.myEarnings)} subtext="Baseado na sua % atual" icon={Icons.Target} color="#fbbf24" />
                 </div>
-
-                {/* --- BOTÃO DE PAGAMENTO (ADMIN/DEV ONLY) --- */}
-                {/* Em produção, você envolveria isso numa verificação if (userData.role === 'admin') */}
-                <div style={{marginBottom: 40, padding: 20, border: '1px dashed #fbbf24', borderRadius: 12, background: 'rgba(251, 191, 36, 0.05)'}}>
-                    <h3 style={{color: '#fbbf24', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 10}}>
-                        <Icons.Lock size={20} /> Área de Simulação de Pagamento
-                    </h3>
-                    <p style={{fontSize: '0.9rem', color: 'var(--text-muted)', marginBottom: 15}}>
-                        Ao clicar abaixo, o sistema irá distribuir <strong>{formatCurrency(campaignEconomics.weeklyPot)}</strong> entre os clipadores listados abaixo e descontar do orçamento da campanha.
-                    </p>
-                    <button onClick={handleSimulatePayout} className="btn" style={{background: '#fbbf24', color: 'black', border: 'none', fontWeight: 'bold'}}>
-                        <Icons.Wallet size={20} style={{marginRight: 8}} />
-                        Simular Fechamento da Semana (Pagar Todos)
-                    </button>
-                </div>
-
-
                 {/* RANKING REAL */}
                 <div style={{background: 'var(--bg-card)', borderRadius: 12, border: '1px solid var(--border)'}}>
                     <div style={{padding: 20, borderBottom: '1px solid var(--border)', fontWeight: 'bold'}}>Ranking Semanal</div>
