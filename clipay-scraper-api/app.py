@@ -4,6 +4,7 @@ import json
 import re
 import random
 import requests
+from datetime import datetime, timedelta, timezone # <--- FALTAVA ESSA LINHA
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 import yt_dlp
@@ -16,7 +17,7 @@ app = Flask(__name__)
 CORS(app)
 
 print("--------------------------------------------------")
-print("--- VERSÃO 13.0: TÁTICA FACEBOOK BOT ---")
+print("--- VERSÃO 13.1: CORREÇÃO DE IMPORT (DATETIME) ---")
 print("--------------------------------------------------")
 
 # --- CONFIGURAÇÃO FIREBASE ---
@@ -35,7 +36,7 @@ if cred:
 
 # --- CONSTANTES ---
 VIDEO_VALIDITY_DAYS = 7
-# PROXY FIXO
+# PROXY FIXO (Hardcoded para teste)
 PROXY_URL = "http://smart-cy39cvakxmr0:pO71SSkduTPYh9nq@proxy.smartproxy.net:3120"
 
 if PROXY_URL:
@@ -76,12 +77,10 @@ def scrape_facebook_bot(url):
         response = requests.get(url, headers=headers, proxies=proxies, timeout=15)
         html = response.text
         
-        # Procura por padrões de views no HTML retornado para o bot
         # Padrão 1: "video_view_count":123
         match_json = re.search(r'"video_view_count":(\d+)', html)
         
-        # Padrão 2: Meta tags específicas
-        # <meta property="og:description" content="109 Views, 20 Likes..." />
+        # Padrão 2: Meta tags
         match_meta = re.search(r'([\d,.]+) views', html, re.IGNORECASE)
         match_plays = re.search(r'([\d,.]+) plays', html, re.IGNORECASE)
 
@@ -90,7 +89,6 @@ def scrape_facebook_bot(url):
             views = int(match_json.group(1))
             print(f"   -> [FB BOT] Achou via JSON: {views}")
         elif match_meta:
-            # Remove virgulas e pontos (ex: 1,200 -> 1200)
             raw_num = match_meta.group(1).replace(',', '').replace('.', '')
             views = int(raw_num)
             print(f"   -> [FB BOT] Achou via Meta Views: {views}")
@@ -100,9 +98,6 @@ def scrape_facebook_bot(url):
             print(f"   -> [FB BOT] Achou via Meta Plays: {views}")
         else:
             print("   -> [FB BOT] HTML baixado mas sem views.")
-            # Debug: Mostra pedaço do título para ver se carregou
-            title_m = re.search(r'<title>(.*?)</title>', html)
-            if title_m: print(f"      Título da pág: {title_m.group(1)}")
 
         return views
 
@@ -116,8 +111,6 @@ def scrape_instaloader(url):
     try:
         L = instaloader.Instaloader()
         L.context._session.proxies = {'http': PROXY_URL, 'https': PROXY_URL}
-        
-        # Instaloader tem seus próprios headers, vamos confiar neles
         
         shortcode = extract_shortcode(url)
         if shortcode:
@@ -143,7 +136,6 @@ def scrape_ytdlp(url):
             print(f"   -> [YT-DLP] Achou: {views}")
             return int(views)
     except Exception as e:
-        # print(f"   -> [YT-DLP] Erro: {str(e)}") # Reduz log de erro do yt-dlp
         return 0
 
 # --- CONTROLADOR ---
@@ -152,9 +144,9 @@ def get_video_info(url):
     time.sleep(random.uniform(1, 3))
 
     if "instagram.com" in url:
-        v1 = scrape_facebook_bot(url) # Tenta se passar por FB
-        v2 = scrape_ytdlp(url)        # Tenta engine yt-dlp
-        v3_val, t3, u3 = scrape_instaloader(url) # Tenta engine instaloader
+        v1 = scrape_facebook_bot(url)
+        v2 = scrape_ytdlp(url)
+        v3_val, t3, u3 = scrape_instaloader(url)
         
         max_views = max(v1, v2, v3_val)
         
@@ -166,13 +158,12 @@ def get_video_info(url):
         return {
             'success': True,
             'views': max_views,
-            'title': t3, # Usa metadados do instaloader que costumam ser bons
+            'title': t3, 
             'description': t3,
             'uploader': u3,
             'platform': 'instagram'
         }
     else:
-        # TikTok/Outros
         v = scrape_ytdlp(url)
         return {'success': True, 'views': v, 'title': '', 'description': '', 'uploader': '', 'platform': 'other'}
 
@@ -211,7 +202,6 @@ def update_batch():
 
             if result['success']:
                 scraped_views = result['views']
-                # PROTEÇÃO: Só atualiza se o novo valor for MAIOR que o atual
                 if scraped_views > current_views:
                     new_views = scraped_views
                     print(f"   *** ATUALIZANDO: {current_views} -> {new_views} ***")
@@ -225,7 +215,6 @@ def update_batch():
                 )
                 new_status = 'approved' if len(validation_errors) == 0 else 'rejected'
                 
-                # Stats
                 views_gained = new_views - current_views
                 if views_gained > 0:
                     today_str = datetime.now().strftime('%Y-%m-%d')
@@ -262,7 +251,7 @@ def update_batch():
 
 @app.route('/', methods=['GET'])
 def health_check():
-    return f"Clipay Scraper V13.0 (FB Bot)"
+    return f"Clipay Scraper V13.1 Running"
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
