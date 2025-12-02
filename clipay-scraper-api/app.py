@@ -42,7 +42,7 @@ VIDEO_VALIDITY_DAYS = 7
 PROXY_URL = os.environ.get('PROXY_URL')
 
 # Se por acaso a variável estiver vazia, você pode descomentar a linha abaixo para TESTE FORÇADO:
-# PROXY_URL = "http://smart-cy39cvakxmr0:pO71SSkduTPYh9nq@proxy.smartproxy.net:3120"
+PROXY_URL = "http://smart-cy39cvakxmr0:pO71SSkduTPYh9nq@proxy.smartproxy.net:3120"
 
 if PROXY_URL:
     print(f"✅ PROXY CARREGADO: {PROXY_URL[:15]}... (Ocultado)")
