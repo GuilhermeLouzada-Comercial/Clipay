@@ -16,7 +16,7 @@ app = Flask(__name__)
 CORS(app)
 
 print("--------------------------------------------------")
-print("--- VERSÃO 10.0: PROXY ROTATIVO INTEGRADO ---")
+print("--- VERSÃO 10.1: CORREÇÃO DA VARIÁVEL DE AMBIENTE ---")
 print("--------------------------------------------------")
 
 # --- CONFIGURAÇÃO FIREBASE ---
@@ -35,8 +35,19 @@ if cred:
 
 # --- CONSTANTES ---
 VIDEO_VALIDITY_DAYS = 7
-# Pega o proxy do Render (Environment Variable)
-PROXY_URL = os.environ.get('http://smart-cy39cvakxmr0:pO71SSkduTPYh9nq@proxy.smartproxy.net:3120')
+
+# --- CORREÇÃO AQUI ---
+# Tentamos pegar da variável de ambiente 'PROXY_URL'. 
+# Se não achar, usamos None.
+PROXY_URL = os.environ.get('PROXY_URL')
+
+# Se por acaso a variável estiver vazia, você pode descomentar a linha abaixo para TESTE FORÇADO:
+# PROXY_URL = "http://smart-cy39cvakxmr0:pO71SSkduTPYh9nq@proxy.smartproxy.net:3120"
+
+if PROXY_URL:
+    print(f"✅ PROXY CARREGADO: {PROXY_URL[:15]}... (Ocultado)")
+else:
+    print("❌ AVISO CRÍTICO: PROXY NÃO ENCONTRADO! RODANDO NO IP DO RENDER.")
 
 USER_AGENTS = [
     'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
@@ -73,10 +84,9 @@ def scrape_insta_fallback(url):
         'user_agent': random.choice(USER_AGENTS)
     }
     
-    # INJEÇÃO DO PROXY NO YT-DLP
     if PROXY_URL:
         ydl_opts['proxy'] = PROXY_URL
-        print("   -> [PROXY] Usando proxy no yt-dlp")
+        print("   -> [PROXY] Injetado no yt-dlp")
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -100,13 +110,13 @@ def scrape_instagram(url):
         L = instaloader.Instaloader()
         L.context._session.headers.update({'User-Agent': random.choice(USER_AGENTS)})
 
-        # INJEÇÃO DO PROXY NO INSTALOADER
         if PROXY_URL:
             L.context._session.proxies = {
                 'http': PROXY_URL,
                 'https': PROXY_URL
             }
-            print("   -> [PROXY] Conexão via Proxy Residencial ativa.")
+            # Teste extra para garantir que o instaloader pegou o proxy
+            print("   -> [PROXY] Configurado no Instaloader.")
 
         shortcode = extract_shortcode(url)
         if shortcode:
@@ -120,7 +130,6 @@ def scrape_instagram(url):
     except Exception as e:
         error_msg = str(e)
         print(f"   -> [INSTALOADER] Erro: {error_msg}")
-        # Mesmo com proxy, podemos pegar erros, mas o 429 deve sumir
 
     ytdlp_result = scrape_insta_fallback(url)
 
@@ -158,7 +167,6 @@ def scrape_generic(url):
         'skip_download': True, 'user_agent': random.choice(USER_AGENTS)
     }
     
-    # INJEÇÃO DO PROXY NO GENÉRICO
     if PROXY_URL:
         ydl_opts['proxy'] = PROXY_URL
 
@@ -180,12 +188,11 @@ def get_video_info(url):
     if "instagram.com" in url: return scrape_instagram(url)
     else: return scrape_generic(url)
 
-# --- ROTA BATCH (MANTIDA IGUAL, MAS PODE SER MAIS RÁPIDA AGORA) ---
+# --- ROTA BATCH ---
 @app.route('/cron/update-batch', methods=['GET'])
 def update_batch():
     if not cred: return jsonify({'error': 'Firebase not connected'}), 500
 
-    # Com proxy, podemos arriscar um lote maior se quisermos, mas 3 é seguro para 1GB
     BATCH_SIZE = 3 
     processed = []
     
@@ -214,14 +221,12 @@ def update_batch():
             
             result = get_video_info(url)
 
-            # Com proxy, o erro RATE_LIMIT deve ser raríssimo
             if not result['success'] and result.get('error') == 'RATE_LIMIT':
-                print("!!! RATE LIMIT (PROXY FALHOU) !!!")
+                print("!!! RATE LIMIT (PROXY FALHOU OU ESGOTOU) !!!")
                 break 
 
             if result['success']:
                 scraped_views = result['views']
-                # Lógica de proteção de view zerada
                 if scraped_views is None:
                     new_views = current_views
                 else:
@@ -236,7 +241,7 @@ def update_batch():
                 )
                 new_status = 'approved' if len(validation_errors) == 0 else 'rejected'
                 
-                # Stats Diários
+                # Stats
                 views_gained = new_views - current_views
                 if views_gained > 0:
                     today_str = datetime.now().strftime('%Y-%m-%d')
@@ -261,7 +266,6 @@ def update_batch():
                 })
                 processed.append({'id': vid_id, 'views': new_views, 'gained': views_gained})
             
-            # Com proxy, podemos dormir menos tempo
             time.sleep(random.uniform(2, 5))
 
         return jsonify({'processed': processed})
@@ -273,7 +277,7 @@ def update_batch():
 @app.route('/', methods=['GET'])
 def health_check():
     proxy_status = "ATIVO" if PROXY_URL else "INATIVO"
-    return f"Clipay Scraper V10 (Proxy: {proxy_status})"
+    return f"Clipay Scraper V10.1 (Proxy: {proxy_status})"
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
