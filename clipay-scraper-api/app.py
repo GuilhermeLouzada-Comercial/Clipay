@@ -4,7 +4,6 @@ import json
 import re
 import random
 import requests
-from datetime import datetime, timedelta, timezone # <--- FALTAVA ESSA LINHA
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 import yt_dlp
@@ -17,7 +16,7 @@ app = Flask(__name__)
 CORS(app)
 
 print("--------------------------------------------------")
-print("--- VERSÃO 13.1: CORREÇÃO DE IMPORT (DATETIME) ---")
+print("--- VERSÃO 13.2: SEM FILTRO DE DATA (ALL IN) ---")
 print("--------------------------------------------------")
 
 # --- CONFIGURAÇÃO FIREBASE ---
@@ -35,8 +34,7 @@ if cred:
     db = firestore.client()
 
 # --- CONSTANTES ---
-VIDEO_VALIDITY_DAYS = 7
-# PROXY FIXO (Hardcoded para teste)
+# PROXY HARDCODED
 PROXY_URL = "http://smart-cy39cvakxmr0:pO71SSkduTPYh9nq@proxy.smartproxy.net:3120"
 
 if PROXY_URL:
@@ -62,25 +60,18 @@ def extract_shortcode(url):
 
 # --- SCRAPER 1: FACEBOOK CRAWLER SPOOFING ---
 def scrape_facebook_bot(url):
-    print(f"   -> [FB BOT] Tentando fingir ser o Facebook...")
-    
+    print(f"   -> [FB BOT] Tentando...")
     proxies = {"http": PROXY_URL, "https": PROXY_URL}
-    
-    # O User-Agent Mágico
     headers = {
         'User-Agent': 'facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         'Accept-Language': 'en-US,en;q=0.9'
     }
-
     try:
         response = requests.get(url, headers=headers, proxies=proxies, timeout=15)
         html = response.text
         
-        # Padrão 1: "video_view_count":123
         match_json = re.search(r'"video_view_count":(\d+)', html)
-        
-        # Padrão 2: Meta tags
         match_meta = re.search(r'([\d,.]+) views', html, re.IGNORECASE)
         match_plays = re.search(r'([\d,.]+) plays', html, re.IGNORECASE)
 
@@ -98,14 +89,12 @@ def scrape_facebook_bot(url):
             print(f"   -> [FB BOT] Achou via Meta Plays: {views}")
         else:
             print("   -> [FB BOT] HTML baixado mas sem views.")
-
         return views
-
     except Exception as e:
         print(f"   -> [FB BOT] Erro: {str(e)}")
         return 0
 
-# --- SCRAPER 2: INSTALOADER (CACHE) ---
+# --- SCRAPER 2: INSTALOADER ---
 def scrape_instaloader(url):
     print(f"   -> [INSTALOADER] Tentando...")
     try:
@@ -122,7 +111,7 @@ def scrape_instaloader(url):
         print(f"   -> [INSTALOADER] Erro: {str(e)}")
         return 0, "", ""
 
-# --- SCRAPER 3: YT-DLP (FALLBACK) ---
+# --- SCRAPER 3: YT-DLP ---
 def scrape_ytdlp(url):
     print(f"   -> [YT-DLP] Tentando...")
     ydl_opts = {
@@ -149,7 +138,6 @@ def get_video_info(url):
         v3_val, t3, u3 = scrape_instaloader(url)
         
         max_views = max(v1, v2, v3_val)
-        
         print(f"   => [PLACAR] FB:{v1} | YTDLP:{v2} | INSTA:{v3_val} -> VENCEDOR: {max_views}")
         
         if max_views == 0:
@@ -167,7 +155,7 @@ def get_video_info(url):
         v = scrape_ytdlp(url)
         return {'success': True, 'views': v, 'title': '', 'description': '', 'uploader': '', 'platform': 'other'}
 
-# --- ROTA BATCH ---
+# --- ROTA BATCH (SEM DATA) ---
 @app.route('/cron/update-batch', methods=['GET'])
 def update_batch():
     if not cred: return jsonify({'error': 'Firebase not connected'}), 500
@@ -177,18 +165,17 @@ def update_batch():
     
     try:
         videos_ref = db.collection('videos')
-        cutoff_date = datetime.now(timezone.utc) - timedelta(days=VIDEO_VALIDITY_DAYS)
 
+        # QUERY SIMPLIFICADA: Pega qualquer pendente/aprovado ordenado por lastUpdated
         query = videos_ref.where(filter=FieldFilter('status', 'in', ['pending', 'approved', 'check_rules']))\
-                          .where(filter=FieldFilter('createdAt', '>=', cutoff_date))\
-                          .order_by('createdAt', direction=firestore.Query.ASCENDING)\
+                          .order_by('lastUpdated', direction=firestore.Query.ASCENDING)\
                           .limit(BATCH_SIZE)
         
         docs = query.stream()
         docs_list = list(docs)
 
         if not docs_list:
-            return jsonify({'status': 'no_active_videos_to_update'})
+            return jsonify({'status': 'no_videos_found'})
 
         print(f"=== Iniciando Lote de {len(docs_list)} vídeos ===")
 
@@ -207,7 +194,7 @@ def update_batch():
                     print(f"   *** ATUALIZANDO: {current_views} -> {new_views} ***")
                 else:
                     new_views = current_views
-                    print(f"   --- Mantendo: {current_views} (Scraper achou {scraped_views}) ---")
+                    print(f"   --- Mantendo: {current_views} ---")
 
                 validation_errors = validate_content(
                     result.get('title'), result.get('description'), 
@@ -215,17 +202,16 @@ def update_batch():
                 )
                 new_status = 'approved' if len(validation_errors) == 0 else 'rejected'
                 
+                # Stats Diários
                 views_gained = new_views - current_views
                 if views_gained > 0:
                     today_str = datetime.now().strftime('%Y-%m-%d')
                     stats_id = f"{today_str}_{vid_id}"
-                    
                     db.collection('daily_stats').document(stats_id).set({
                         'date': today_str,
                         'videoId': vid_id,
                         'campaignId': data.get('campaignId'),
                         'userId': data.get('userId'),
-                        'platform': data.get('platform', 'unknown'),
                         'dailyViews': firestore.Increment(views_gained),
                         'totalViewsSnapshot': new_views,
                         'lastUpdated': firestore.SERVER_TIMESTAMP
@@ -239,7 +225,7 @@ def update_batch():
                 })
                 processed.append({'id': vid_id, 'views': new_views})
             else:
-                print("   x Falha geral na leitura.")
+                print("   x Falha geral.")
             
             time.sleep(random.uniform(2, 5))
 
@@ -251,7 +237,7 @@ def update_batch():
 
 @app.route('/', methods=['GET'])
 def health_check():
-    return f"Clipay Scraper V13.1 Running"
+    return f"Clipay Scraper V13.2 (No Date Filter)"
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
