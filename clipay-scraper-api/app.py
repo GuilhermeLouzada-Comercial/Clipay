@@ -36,7 +36,7 @@ if cred:
 # --- CONSTANTES ---
 VIDEO_VALIDITY_DAYS = 7
 # Pega o proxy do Render (Environment Variable)
-PROXY_URL = os.environ.get(http://smart-cy39cvakxmr0:pO71SSkduTPYh9nq@proxy.smartproxy.net:3120)
+PROXY_URL = os.environ.get('http://smart-cy39cvakxmr0:pO71SSkduTPYh9nq@proxy.smartproxy.net:3120')
 
 USER_AGENTS = [
     'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
