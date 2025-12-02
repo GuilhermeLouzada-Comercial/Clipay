@@ -4,7 +4,6 @@ import json
 import re
 import random
 import requests
-from datetime import datetime, timedelta, timezone
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 import yt_dlp
@@ -17,7 +16,7 @@ app = Flask(__name__)
 CORS(app)
 
 print("--------------------------------------------------")
-print("--- VERSÃO 12.0: A COMPETIÇÃO (MAX VIEWS STRATEGY) ---")
+print("--- VERSÃO 13.0: TÁTICA FACEBOOK BOT ---")
 print("--------------------------------------------------")
 
 # --- CONFIGURAÇÃO FIREBASE ---
@@ -36,17 +35,11 @@ if cred:
 
 # --- CONSTANTES ---
 VIDEO_VALIDITY_DAYS = 7
-# PROXY HARDCODED (PARA GARANTIR O FUNCIONAMENTO)
+# PROXY FIXO
 PROXY_URL = "http://smart-cy39cvakxmr0:pO71SSkduTPYh9nq@proxy.smartproxy.net:3120"
 
 if PROXY_URL:
-    print(f"✅ PROXY FIXO ATIVO.")
-
-USER_AGENTS = [
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1'
-]
+    print(f"✅ PROXY ATIVO.")
 
 # --- FUNÇÕES AUXILIARES ---
 def validate_content(title, description, req_hashtag, req_mention):
@@ -66,72 +59,65 @@ def extract_shortcode(url):
     match = re.search(r'/(?:reel|p)/([^/?#&]+)', url)
     return match.group(1) if match else None
 
-# --- SCRAPER 1: JSON HACK (NOVO) ---
-def scrape_insta_json(url):
-    print(f"   -> [JSON HACK] Tentando...")
-    shortcode = extract_shortcode(url)
-    if not shortcode: return 0
-    
-    # URL Mágica que força JSON
-    api_url = f"https://www.instagram.com/reel/{shortcode}/?__a=1&__d=dis"
+# --- SCRAPER 1: FACEBOOK CRAWLER SPOOFING ---
+def scrape_facebook_bot(url):
+    print(f"   -> [FB BOT] Tentando fingir ser o Facebook...")
     
     proxies = {"http": PROXY_URL, "https": PROXY_URL}
+    
+    # O User-Agent Mágico
     headers = {
-        'User-Agent': random.choice(USER_AGENTS),
-        'Accept': 'application/json',
-        'X-IG-App-ID': '936619743392459', # ID Público do Instagram Web
+        'User-Agent': 'facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9'
     }
 
     try:
-        response = requests.get(api_url, headers=headers, proxies=proxies, timeout=10)
-        if response.status_code == 200:
-            data = response.json()
-            # Navega no JSON para achar views
-            # Pode estar em items[0].play_count ou view_count
-            item = data.get('graphql', {}).get('shortcode_media', {})
-            if not item:
-                item = data.get('items', [{}])[0]
-            
-            views = item.get('video_view_count') or item.get('play_count') or item.get('view_count') or 0
-            
-            print(f"   -> [JSON HACK] Achou: {views}")
-            return int(views)
+        response = requests.get(url, headers=headers, proxies=proxies, timeout=15)
+        html = response.text
+        
+        # Procura por padrões de views no HTML retornado para o bot
+        # Padrão 1: "video_view_count":123
+        match_json = re.search(r'"video_view_count":(\d+)', html)
+        
+        # Padrão 2: Meta tags específicas
+        # <meta property="og:description" content="109 Views, 20 Likes..." />
+        match_meta = re.search(r'([\d,.]+) views', html, re.IGNORECASE)
+        match_plays = re.search(r'([\d,.]+) plays', html, re.IGNORECASE)
+
+        views = 0
+        if match_json:
+            views = int(match_json.group(1))
+            print(f"   -> [FB BOT] Achou via JSON: {views}")
+        elif match_meta:
+            # Remove virgulas e pontos (ex: 1,200 -> 1200)
+            raw_num = match_meta.group(1).replace(',', '').replace('.', '')
+            views = int(raw_num)
+            print(f"   -> [FB BOT] Achou via Meta Views: {views}")
+        elif match_plays:
+            raw_num = match_plays.group(1).replace(',', '').replace('.', '')
+            views = int(raw_num)
+            print(f"   -> [FB BOT] Achou via Meta Plays: {views}")
         else:
-            print(f"   -> [JSON HACK] Falhou: {response.status_code}")
-            return 0
+            print("   -> [FB BOT] HTML baixado mas sem views.")
+            # Debug: Mostra pedaço do título para ver se carregou
+            title_m = re.search(r'<title>(.*?)</title>', html)
+            if title_m: print(f"      Título da pág: {title_m.group(1)}")
+
+        return views
+
     except Exception as e:
-        print(f"   -> [JSON HACK] Erro: {str(e)}")
+        print(f"   -> [FB BOT] Erro: {str(e)}")
         return 0
 
-# --- SCRAPER 2: YT-DLP (SEMPRE RODAR) ---
-def scrape_ytdlp(url):
-    print(f"   -> [YT-DLP] Tentando...")
-    ydl_opts = {
-        'quiet': True,
-        'no_warnings': True,
-        'dump_single_json': True,
-        'skip_download': True,
-        'proxy': PROXY_URL, # Força o proxy
-        'user_agent': random.choice(USER_AGENTS)
-    }
-    
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-            views = info.get('view_count', 0)
-            print(f"   -> [YT-DLP] Achou: {views}")
-            return int(views), info.get('title', ''), info.get('uploader', '')
-    except Exception as e:
-        print(f"   -> [YT-DLP] Erro: {str(e)}")
-        return 0, "", ""
-
-# --- SCRAPER 3: INSTALOADER (CACHE) ---
+# --- SCRAPER 2: INSTALOADER (CACHE) ---
 def scrape_instaloader(url):
     print(f"   -> [INSTALOADER] Tentando...")
     try:
         L = instaloader.Instaloader()
         L.context._session.proxies = {'http': PROXY_URL, 'https': PROXY_URL}
-        L.context._session.headers.update({'User-Agent': random.choice(USER_AGENTS)})
+        
+        # Instaloader tem seus próprios headers, vamos confiar neles
         
         shortcode = extract_shortcode(url)
         if shortcode:
@@ -143,48 +129,52 @@ def scrape_instaloader(url):
         print(f"   -> [INSTALOADER] Erro: {str(e)}")
         return 0, "", ""
 
-# --- CONTROLADOR PRINCIPAL ---
+# --- SCRAPER 3: YT-DLP (FALLBACK) ---
+def scrape_ytdlp(url):
+    print(f"   -> [YT-DLP] Tentando...")
+    ydl_opts = {
+        'quiet': True, 'no_warnings': True, 'dump_single_json': True, 
+        'skip_download': True, 'proxy': PROXY_URL
+    }
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+            views = info.get('view_count', 0)
+            print(f"   -> [YT-DLP] Achou: {views}")
+            return int(views)
+    except Exception as e:
+        # print(f"   -> [YT-DLP] Erro: {str(e)}") # Reduz log de erro do yt-dlp
+        return 0
+
+# --- CONTROLADOR ---
 def get_video_info(url):
-    print(f"--> [SCRAPER] Iniciando competição para: {url}")
+    print(f"--> [SCRAPER] Analisando: {url}")
     time.sleep(random.uniform(1, 3))
 
-    # Roda TODOS (se for instagram)
     if "instagram.com" in url:
-        v1 = scrape_insta_json(url)
-        v2, t2, u2 = scrape_ytdlp(url)
-        v3, t3, u3 = scrape_instaloader(url)
+        v1 = scrape_facebook_bot(url) # Tenta se passar por FB
+        v2 = scrape_ytdlp(url)        # Tenta engine yt-dlp
+        v3_val, t3, u3 = scrape_instaloader(url) # Tenta engine instaloader
         
-        # Pega o MAIOR valor encontrado
-        max_views = max(v1, v2, v3)
+        max_views = max(v1, v2, v3_val)
         
-        # Define título/uploader (prioriza yt-dlp ou instaloader)
-        final_title = t2 or t3 or ""
-        final_uploader = u2 or u3 or ""
-        
-        print(f"   => [RESULTADO] Vencedor: {max_views} views (Json:{v1}, Ytdlp:{v2}, Insta:{v3})")
+        print(f"   => [PLACAR] FB:{v1} | YTDLP:{v2} | INSTA:{v3_val} -> VENCEDOR: {max_views}")
         
         if max_views == 0:
-            return {'success': False, 'error': 'Todos retornaram 0'}
+            return {'success': False, 'error': 'Zero views found'}
             
         return {
             'success': True,
             'views': max_views,
-            'title': final_title,
-            'description': final_title,
-            'uploader': final_uploader,
+            'title': t3, # Usa metadados do instaloader que costumam ser bons
+            'description': t3,
+            'uploader': u3,
             'platform': 'instagram'
         }
     else:
-        # Genérico para TikTok/Shorts
-        v, t, u = scrape_ytdlp(url)
-        return {
-            'success': True,
-            'views': v,
-            'title': t,
-            'description': t,
-            'uploader': u,
-            'platform': 'other'
-        }
+        # TikTok/Outros
+        v = scrape_ytdlp(url)
+        return {'success': True, 'views': v, 'title': '', 'description': '', 'uploader': '', 'platform': 'other'}
 
 # --- ROTA BATCH ---
 @app.route('/cron/update-batch', methods=['GET'])
@@ -221,12 +211,13 @@ def update_batch():
 
             if result['success']:
                 scraped_views = result['views']
-                
-                # Lógica "Only Up": Nunca diminui views
+                # PROTEÇÃO: Só atualiza se o novo valor for MAIOR que o atual
                 if scraped_views > current_views:
                     new_views = scraped_views
+                    print(f"   *** ATUALIZANDO: {current_views} -> {new_views} ***")
                 else:
                     new_views = current_views
+                    print(f"   --- Mantendo: {current_views} (Scraper achou {scraped_views}) ---")
 
                 validation_errors = validate_content(
                     result.get('title'), result.get('description'), 
@@ -257,7 +248,9 @@ def update_batch():
                     'validationErrors': validation_errors,
                     'lastUpdated': firestore.SERVER_TIMESTAMP
                 })
-                processed.append({'id': vid_id, 'views': new_views, 'from': current_views})
+                processed.append({'id': vid_id, 'views': new_views})
+            else:
+                print("   x Falha geral na leitura.")
             
             time.sleep(random.uniform(2, 5))
 
@@ -269,7 +262,7 @@ def update_batch():
 
 @app.route('/', methods=['GET'])
 def health_check():
-    return f"Clipay Scraper V12.0 Competition"
+    return f"Clipay Scraper V13.0 (FB Bot)"
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
