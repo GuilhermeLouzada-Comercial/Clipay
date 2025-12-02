@@ -3,6 +3,7 @@ import time
 import json
 import re
 import random
+import requests # <--- IMPORTANTE
 from datetime import datetime, timedelta, timezone
 from flask import Flask, jsonify, request
 from flask_cors import CORS
@@ -16,7 +17,7 @@ app = Flask(__name__)
 CORS(app)
 
 print("--------------------------------------------------")
-print("--- VERSÃO 10.1: CORREÇÃO DA VARIÁVEL DE AMBIENTE ---")
+print("--- VERSÃO 11.0: THE HUNTER (RAW HTML + REGEX) ---")
 print("--------------------------------------------------")
 
 # --- CONFIGURAÇÃO FIREBASE ---
@@ -35,24 +36,18 @@ if cred:
 
 # --- CONSTANTES ---
 VIDEO_VALIDITY_DAYS = 7
-
-# --- CORREÇÃO AQUI ---
-# Tentamos pegar da variável de ambiente 'PROXY_URL'. 
-# Se não achar, usamos None.
-PROXY_URL = os.environ.get('PROXY_URL')
-
-# Se por acaso a variável estiver vazia, você pode descomentar a linha abaixo para TESTE FORÇADO:
 PROXY_URL = "http://smart-cy39cvakxmr0:pO71SSkduTPYh9nq@proxy.smartproxy.net:3120"
 
 if PROXY_URL:
-    print(f"✅ PROXY CARREGADO: {PROXY_URL[:15]}... (Ocultado)")
+    print(f"✅ PROXY ATIVO: {PROXY_URL[:15]}...")
 else:
-    print("❌ AVISO CRÍTICO: PROXY NÃO ENCONTRADO! RODANDO NO IP DO RENDER.")
+    print("❌ AVISO: SEM PROXY CONFIGURADO")
 
 USER_AGENTS = [
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
-    'Mozilla/5.0 (Linux; Android 13; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Mobile Safari/537.36',
-    'Mozilla/5.0 (iPhone; CPU iPhone OS 15_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Instagram 239.1.0.26.109'
+    'Mozilla/5.0 (Linux; Android 13; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Mobile Safari/537.36'
 ]
 
 # --- FUNÇÕES AUXILIARES ---
@@ -73,50 +68,99 @@ def extract_shortcode(url):
     match = re.search(r'/(?:reel|p)/([^/?#&]+)', url)
     return match.group(1) if match else None
 
+# --- NOVA ESTRATÉGIA: REQUEST DIRETO (RAW HTML) ---
+def scrape_insta_raw(url):
+    print(f"   -> [HUNTER] Tentando extração direta via HTML...")
+    
+    # Prepara o Proxy para o Requests
+    proxies = None
+    if PROXY_URL:
+        proxies = {
+            "http": PROXY_URL,
+            "https": PROXY_URL
+        }
+
+    headers = {
+        'User-Agent': random.choice(USER_AGENTS),
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Referer': 'https://www.instagram.com/',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'cross-site',
+        'Upgrade-Insecure-Requests': '1'
+    }
+
+    try:
+        # Faz a requisição direta
+        response = requests.get(url, headers=headers, proxies=proxies, timeout=15)
+        
+        if response.status_code == 200:
+            html = response.text
+            
+            # PROCURA 1: Padrão video_view_count
+            # Procura por "video_view_count":1234
+            view_match = re.search(r'"video_view_count":(\d+)', html)
+            
+            # PROCURA 2: Padrão view_count (as vezes muda)
+            if not view_match:
+                view_match = re.search(r'"view_count":(\d+)', html)
+                
+            # PROCURA TÍTULO (description)
+            # <meta property="og:description" content="Titulo aqui..." />
+            desc_match = re.search(r'<meta property="og:description" content="([^"]+)"', html)
+            title = desc_match.group(1) if desc_match else ""
+
+            if view_match:
+                views = int(view_match.group(1))
+                print(f"   -> [HUNTER] SUCESSO! Regex achou: {views}")
+                return {'views': views, 'title': title, 'uploader': 'unknown'}
+            else:
+                print("   -> [HUNTER] HTML baixado, mas padrão de views não encontrado.")
+                # Debug: Salvar HTML se quiser
+                return None
+        else:
+            print(f"   -> [HUNTER] Falha HTTP: {response.status_code}")
+            return None
+
+    except Exception as e:
+        print(f"   -> [HUNTER] Erro: {str(e)}")
+        return None
+
 # --- SCRAPER FALLBACK (YT-DLP) ---
 def scrape_insta_fallback(url):
     print(f"   -> [FALLBACK] Consultando yt-dlp...")
     ydl_opts = {
-        'quiet': True,
-        'no_warnings': True,
-        'dump_single_json': True,
-        'skip_download': True,
-        'user_agent': random.choice(USER_AGENTS)
+        'quiet': True, 'no_warnings': True, 'dump_single_json': True, 
+        'skip_download': True, 'user_agent': random.choice(USER_AGENTS)
     }
-    
-    if PROXY_URL:
-        ydl_opts['proxy'] = PROXY_URL
-        print("   -> [PROXY] Injetado no yt-dlp")
+    if PROXY_URL: ydl_opts['proxy'] = PROXY_URL
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
             views = info.get('view_count', 0)
-            title = info.get('description', '') or info.get('title', '')
             print(f"   -> [FALLBACK] yt-dlp achou: {views}")
-            return {'views': views, 'title': title, 'uploader': info.get('uploader', '')}
+            return {'views': views, 'title': info.get('title', ''), 'uploader': info.get('uploader', '')}
     except Exception as e:
-        print(f"   -> [FALLBACK] Erro: {str(e)}")
         return None
 
 # --- SCRAPER PRINCIPAL (INSTALOADER) ---
 def scrape_instagram(url):
     print(f"--> [INSTA] Tentando: {url}")
-    
     time.sleep(random.uniform(1, 3))
     
+    # 1. TENTATIVA "HUNTER" (RAW HTML + PROXY)
+    # Essa é a mais provável de pegar dados frescos se o proxy for bom
+    hunter_result = scrape_insta_raw(url)
+
+    # 2. TENTATIVA INSTALOADER (CACHE)
     instaloader_result = None
     try:
         L = instaloader.Instaloader()
         L.context._session.headers.update({'User-Agent': random.choice(USER_AGENTS)})
-
         if PROXY_URL:
-            L.context._session.proxies = {
-                'http': PROXY_URL,
-                'https': PROXY_URL
-            }
-            # Teste extra para garantir que o instaloader pegou o proxy
-            print("   -> [PROXY] Configurado no Instaloader.")
+            L.context._session.proxies = {'http': PROXY_URL, 'https': PROXY_URL}
 
         shortcode = extract_shortcode(url)
         if shortcode:
@@ -128,48 +172,48 @@ def scrape_instagram(url):
             }
             print(f"   -> [INSTALOADER] Achou: {instaloader_result['views']}")
     except Exception as e:
-        error_msg = str(e)
-        print(f"   -> [INSTALOADER] Erro: {error_msg}")
+        print(f"   -> [INSTALOADER] Erro: {str(e)}")
 
-    ytdlp_result = scrape_insta_fallback(url)
-
+    # 3. CONSOLIDAÇÃO (PEGAR O MAIOR VALOR)
     final_views = 0
     final_title = ""
-    final_uploader = ""
-
-    if instaloader_result:
-        final_views = instaloader_result['views']
-        final_title = instaloader_result['title']
-        final_uploader = instaloader_result['uploader']
-
-    if ytdlp_result and ytdlp_result['views'] > final_views:
-        print(f"   -> [DECISÃO] yt-dlp venceu ({ytdlp_result['views']} > {final_views})")
-        final_views = ytdlp_result['views']
-        if not final_title: final_title = ytdlp_result['title']
-        if not final_uploader: final_uploader = ytdlp_result['uploader']
     
-    if not instaloader_result and not ytdlp_result:
-        return {'success': False, 'error': 'Ambos scrapers falharam'}
+    # Verifica Hunter
+    if hunter_result and hunter_result['views'] > final_views:
+        final_views = hunter_result['views']
+        final_title = hunter_result['title']
+        print(f"   => Usando dados do HUNTER ({final_views})")
+
+    # Verifica Instaloader (Backup)
+    if instaloader_result:
+        if instaloader_result['views'] > final_views:
+            final_views = instaloader_result['views']
+            final_title = instaloader_result['title']
+            print(f"   => Usando dados do INSTALOADER ({final_views})")
+    
+    # Fallback yt-dlp (Último caso)
+    if final_views == 0:
+        ytdlp_result = scrape_insta_fallback(url)
+        if ytdlp_result and ytdlp_result['views'] > 0:
+            final_views = ytdlp_result['views']
+            print(f"   => Salvo pelo GONGO (yt-dlp): {final_views}")
+
+    if final_views == 0 and not instaloader_result and not hunter_result:
+        return {'success': False, 'error': 'Todos falharam'}
 
     return {
         'success': True,
         'views': final_views,
         'title': final_title,
         'description': final_title,
-        'uploader': final_uploader,
+        'uploader': 'instagram_user',
         'platform': 'instagram'
     }
 
 def scrape_generic(url):
     print(f"--> [GENERIC] Tentando: {url}")
-    ydl_opts = {
-        'quiet': True, 'no_warnings': True, 'dump_single_json': True, 
-        'skip_download': True, 'user_agent': random.choice(USER_AGENTS)
-    }
-    
-    if PROXY_URL:
-        ydl_opts['proxy'] = PROXY_URL
-
+    ydl_opts = {'quiet': True, 'no_warnings': True, 'dump_single_json': True, 'skip_download': True}
+    if PROXY_URL: ydl_opts['proxy'] = PROXY_URL
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
@@ -221,10 +265,6 @@ def update_batch():
             
             result = get_video_info(url)
 
-            if not result['success'] and result.get('error') == 'RATE_LIMIT':
-                print("!!! RATE LIMIT (PROXY FALHOU OU ESGOTOU) !!!")
-                break 
-
             if result['success']:
                 scraped_views = result['views']
                 if scraped_views is None:
@@ -264,7 +304,7 @@ def update_batch():
                     'validationErrors': validation_errors,
                     'lastUpdated': firestore.SERVER_TIMESTAMP
                 })
-                processed.append({'id': vid_id, 'views': new_views, 'gained': views_gained})
+                processed.append({'id': vid_id, 'views': new_views})
             
             time.sleep(random.uniform(2, 5))
 
@@ -277,7 +317,7 @@ def update_batch():
 @app.route('/', methods=['GET'])
 def health_check():
     proxy_status = "ATIVO" if PROXY_URL else "INATIVO"
-    return f"Clipay Scraper V10.1 (Proxy: {proxy_status})"
+    return f"Clipay Scraper V11.0 Hunter"
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
