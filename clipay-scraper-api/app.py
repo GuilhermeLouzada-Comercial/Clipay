@@ -16,7 +16,7 @@ app = Flask(__name__)
 CORS(app)
 
 print("--------------------------------------------------")
-print("--- VERSÃO 9.0: DOUBLE CHECK (INSTALOADER + YTDLP) ---")
+print("--- VERSÃO 10.0: PROXY ROTATIVO INTEGRADO ---")
 print("--------------------------------------------------")
 
 # --- CONFIGURAÇÃO FIREBASE ---
@@ -35,12 +35,12 @@ if cred:
 
 # --- CONSTANTES ---
 VIDEO_VALIDITY_DAYS = 7
+# Pega o proxy do Render (Environment Variable)
+PROXY_URL = os.environ.get(http://smart-cy39cvakxmr0:pO71SSkduTPYh9nq@proxy.smartproxy.net:3120)
 
-# Lista de agentes para enganar o cache do Instagram
 USER_AGENTS = [
     'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
     'Mozilla/5.0 (Linux; Android 13; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Mobile Safari/537.36',
-    'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Mobile Safari/537.36',
     'Mozilla/5.0 (iPhone; CPU iPhone OS 15_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Instagram 239.1.0.26.109'
 ]
 
@@ -62,17 +62,22 @@ def extract_shortcode(url):
     match = re.search(r'/(?:reel|p)/([^/?#&]+)', url)
     return match.group(1) if match else None
 
-# --- SCRAPER AUXILIAR: INSTAGRAM VIA YT-DLP ---
+# --- SCRAPER FALLBACK (YT-DLP) ---
 def scrape_insta_fallback(url):
-    # Tenta usar yt-dlp especificamente para Instagram como "segunda opinião"
-    print(f"   -> [FALLBACK] Consultando yt-dlp para tirar a prova...")
+    print(f"   -> [FALLBACK] Consultando yt-dlp...")
     ydl_opts = {
         'quiet': True,
         'no_warnings': True,
         'dump_single_json': True,
         'skip_download': True,
-        'user_agent': random.choice(USER_AGENTS) # Tenta um agente aleatório
+        'user_agent': random.choice(USER_AGENTS)
     }
+    
+    # INJEÇÃO DO PROXY NO YT-DLP
+    if PROXY_URL:
+        ydl_opts['proxy'] = PROXY_URL
+        print("   -> [PROXY] Usando proxy no yt-dlp")
+
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
@@ -84,20 +89,24 @@ def scrape_insta_fallback(url):
         print(f"   -> [FALLBACK] Erro: {str(e)}")
         return None
 
-# --- SCRAPER PRINCIPAL: INSTAGRAM ---
+# --- SCRAPER PRINCIPAL (INSTALOADER) ---
 def scrape_instagram(url):
     print(f"--> [INSTA] Tentando: {url}")
     
-    # Pausa aleatória
-    time.sleep(random.uniform(2, 5))
+    time.sleep(random.uniform(1, 3))
     
-    # 1. TENTA VIA INSTALOADER
     instaloader_result = None
     try:
         L = instaloader.Instaloader()
-        # Rotação de User Agent
-        agent = random.choice(USER_AGENTS)
-        L.context._session.headers.update({'User-Agent': agent})
+        L.context._session.headers.update({'User-Agent': random.choice(USER_AGENTS)})
+
+        # INJEÇÃO DO PROXY NO INSTALOADER
+        if PROXY_URL:
+            L.context._session.proxies = {
+                'http': PROXY_URL,
+                'https': PROXY_URL
+            }
+            print("   -> [PROXY] Conexão via Proxy Residencial ativa.")
 
         shortcode = extract_shortcode(url)
         if shortcode:
@@ -111,36 +120,25 @@ def scrape_instagram(url):
     except Exception as e:
         error_msg = str(e)
         print(f"   -> [INSTALOADER] Erro: {error_msg}")
-        if "401" in error_msg or "429" in error_msg:
-             # Se deu bloqueio feio no Instaloader, retorna erro de Rate Limit
-             return {'success': False, 'error': 'RATE_LIMIT', 'details': error_msg}
+        # Mesmo com proxy, podemos pegar erros, mas o 429 deve sumir
 
-    # 2. TENTA VIA YT-DLP (FALLBACK / SEGUNDA OPINIÃO)
-    # Sempre chamamos o fallback se o Instaloader der erro OU se acharmos poucas views (segurança)
-    # Mas para garantir, vamos chamar sempre que possível para comparar.
     ytdlp_result = scrape_insta_fallback(url)
 
-    # 3. COMPARAÇÃO E DECISÃO (O MAIOR VENCE)
     final_views = 0
     final_title = ""
     final_uploader = ""
 
-    # Pega dados do Instaloader se existirem
     if instaloader_result:
         final_views = instaloader_result['views']
         final_title = instaloader_result['title']
         final_uploader = instaloader_result['uploader']
 
-    # Se yt-dlp achou mais views, usamos ele (ignora cache antigo do instaloader)
     if ytdlp_result and ytdlp_result['views'] > final_views:
         print(f"   -> [DECISÃO] yt-dlp venceu ({ytdlp_result['views']} > {final_views})")
         final_views = ytdlp_result['views']
-        if not final_title: final_title = ytdlp_result['title'] # Garante título se faltar
+        if not final_title: final_title = ytdlp_result['title']
         if not final_uploader: final_uploader = ytdlp_result['uploader']
-    elif instaloader_result:
-        print(f"   -> [DECISÃO] Mantendo Instaloader ({final_views})")
     
-    # Se ambos falharam
     if not instaloader_result and not ytdlp_result:
         return {'success': False, 'error': 'Ambos scrapers falharam'}
 
@@ -148,7 +146,7 @@ def scrape_instagram(url):
         'success': True,
         'views': final_views,
         'title': final_title,
-        'description': final_title, # Instagram usa caption como desc
+        'description': final_title,
         'uploader': final_uploader,
         'platform': 'instagram'
     }
@@ -156,12 +154,14 @@ def scrape_instagram(url):
 def scrape_generic(url):
     print(f"--> [GENERIC] Tentando: {url}")
     ydl_opts = {
-        'quiet': True, 
-        'no_warnings': True, 
-        'dump_single_json': True, 
-        'skip_download': True,
-        'user_agent': random.choice(USER_AGENTS)
+        'quiet': True, 'no_warnings': True, 'dump_single_json': True, 
+        'skip_download': True, 'user_agent': random.choice(USER_AGENTS)
     }
+    
+    # INJEÇÃO DO PROXY NO GENÉRICO
+    if PROXY_URL:
+        ydl_opts['proxy'] = PROXY_URL
+
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
@@ -180,22 +180,19 @@ def get_video_info(url):
     if "instagram.com" in url: return scrape_instagram(url)
     else: return scrape_generic(url)
 
-# --- ROTA PRINCIPAL ---
+# --- ROTA BATCH (MANTIDA IGUAL, MAS PODE SER MAIS RÁPIDA AGORA) ---
 @app.route('/cron/update-batch', methods=['GET'])
 def update_batch():
     if not cred: return jsonify({'error': 'Firebase not connected'}), 500
 
+    # Com proxy, podemos arriscar um lote maior se quisermos, mas 3 é seguro para 1GB
     BATCH_SIZE = 3 
     processed = []
     
     try:
-        # Pausa inicial
-        time.sleep(random.uniform(0, 5))
-
         videos_ref = db.collection('videos')
         cutoff_date = datetime.now(timezone.utc) - timedelta(days=VIDEO_VALIDITY_DAYS)
 
-        # Query Otimizada
         query = videos_ref.where(filter=FieldFilter('status', 'in', ['pending', 'approved', 'check_rules']))\
                           .where(filter=FieldFilter('createdAt', '>=', cutoff_date))\
                           .order_by('createdAt', direction=firestore.Query.ASCENDING)\
@@ -207,7 +204,7 @@ def update_batch():
         if not docs_list:
             return jsonify({'status': 'no_active_videos_to_update'})
 
-        print(f"=== Iniciando Lote de {len(docs_list)} vídeos VÁLIDOS ===")
+        print(f"=== Iniciando Lote de {len(docs_list)} vídeos ===")
 
         for doc in docs_list:
             data = doc.to_dict()
@@ -215,38 +212,32 @@ def update_batch():
             url = data.get('url')
             current_views = data.get('views', 0)
             
-            # --- SCRAPE ---
             result = get_video_info(url)
 
-            # Rate limit check
+            # Com proxy, o erro RATE_LIMIT deve ser raríssimo
             if not result['success'] and result.get('error') == 'RATE_LIMIT':
-                print("!!! RATE LIMIT DETECTADO - PARANDO O LOTE !!!")
+                print("!!! RATE LIMIT (PROXY FALHOU) !!!")
                 break 
 
             if result['success']:
-                # Pega as views novas. Se for None, mantém a atual.
                 scraped_views = result['views']
+                # Lógica de proteção de view zerada
                 if scraped_views is None:
                     new_views = current_views
                 else:
-                    # Lógica de Proteção: View nunca desce.
-                    # Se o Instagram bugar e mandar 0 ou menos que o atual, mantemos o maior histórico.
                     if int(scraped_views) > current_views:
                         new_views = int(scraped_views)
                     else:
-                        print(f"   -> [INFO] View não subiu (Scraped: {scraped_views} vs Atual: {current_views}). Mantendo atual.")
                         new_views = current_views
 
-                # Validação
                 validation_errors = validate_content(
                     result.get('title'), result.get('description'), 
                     data.get('requiredHashtag', ''), data.get('requiredMention', '')
                 )
                 new_status = 'approved' if len(validation_errors) == 0 else 'rejected'
                 
-                # Histórico Diário
+                # Stats Diários
                 views_gained = new_views - current_views
-                
                 if views_gained > 0:
                     today_str = datetime.now().strftime('%Y-%m-%d')
                     stats_id = f"{today_str}_{vid_id}"
@@ -261,9 +252,7 @@ def update_batch():
                         'totalViewsSnapshot': new_views,
                         'lastUpdated': firestore.SERVER_TIMESTAMP
                     }, merge=True)
-                    print(f"   + {views_gained} views ganhas.")
 
-                # Atualiza Doc
                 videos_ref.document(vid_id).update({
                     'views': new_views,
                     'status': new_status,
@@ -272,9 +261,8 @@ def update_batch():
                 })
                 processed.append({'id': vid_id, 'views': new_views, 'gained': views_gained})
             
-            sleep_time = random.uniform(5, 15)
-            print(f"zzz Dormindo {sleep_time:.1f}s zzz")
-            time.sleep(sleep_time)
+            # Com proxy, podemos dormir menos tempo
+            time.sleep(random.uniform(2, 5))
 
         return jsonify({'processed': processed})
 
@@ -282,30 +270,10 @@ def update_batch():
         print(f"ERRO GERAL: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
-# ROTA LIMPEZA (MANTIDA IGUAL)
-@app.route('/cron/cleanup-expired', methods=['GET'])
-def cleanup_expired():
-    if not cred: return jsonify({'error': 'Firebase not connected'}), 500
-    try:
-        videos_ref = db.collection('videos')
-        cutoff_date = datetime.now(timezone.utc) - timedelta(days=VIDEO_VALIDITY_DAYS)
-        query = videos_ref.where(filter=FieldFilter('createdAt', '<', cutoff_date)).limit(50)
-        docs = query.stream()
-        count = 0
-        batch = db.batch()
-        for doc in docs:
-            data = doc.to_dict()
-            if data.get('status') not in ['finished', 'rejected']:
-                batch.update(doc.reference, {'status': 'finished', 'lastUpdated': firestore.SERVER_TIMESTAMP})
-                count += 1
-        if count > 0: batch.commit()
-        return jsonify({'cleaned_videos': count})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
 @app.route('/', methods=['GET'])
 def health_check():
-    return "Clipay Scraper V9 (Double Check)"
+    proxy_status = "ATIVO" if PROXY_URL else "INATIVO"
+    return f"Clipay Scraper V10 (Proxy: {proxy_status})"
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
